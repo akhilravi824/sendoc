@@ -1,0 +1,62 @@
+rules_version = '2';
+
+// sendoc Firestore security rules
+// Hybrid auth: every visitor (anon or Google) has a UID. Privileged users
+// have a custom claim `role` of "moderator" | "admin" | "super_admin".
+// All admin actions go through API routes that use Admin SDK (which
+// bypasses these rules anyway) — the rules below are defense in depth
+// for any direct client-side reads we want admins to be able to do.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isPrivileged() {
+      return request.auth != null
+        && request.auth.token.role in ["moderator", "admin", "super_admin"];
+    }
+
+    // User profile / role mirror.
+    // Self-read OK; admin-read OK. Writes are server-only (Admin SDK).
+    match /users/{uid} {
+      allow read: if request.auth != null
+        && (request.auth.uid == uid || isPrivileged());
+      allow write: if false;
+    }
+
+    // Documents.
+    match /docs/{docId} {
+      allow read: if request.auth != null
+        && (resource.data.ownerId == request.auth.uid || isPrivileged());
+      allow create: if request.auth != null
+        && request.resource.data.ownerId == request.auth.uid;
+      allow update: if request.auth != null
+        && resource.data.ownerId == request.auth.uid;
+      allow delete: if request.auth != null
+        && (resource.data.ownerId == request.auth.uid || isPrivileged());
+    }
+
+    // Rate-limit counters — server-only.
+    match /rateLimits/{key} {
+      allow read, write: if false;
+    }
+
+    // Reports — anyone (including unauthenticated) can submit via the API
+    // route; nobody can read or write directly. Admins read through their API.
+    match /reports/{reportId} {
+      allow read: if isPrivileged();
+      allow write: if false;
+    }
+
+    // Append-only audit log. Privileged users can read; only the Admin
+    // SDK can write (rules deny all client writes).
+    match /adminAudits/{auditId} {
+      allow read: if isPrivileged();
+      allow write: if false;
+    }
+
+    // Old takedowns collection (pre-refactor). Drop once migrated.
+    match /takedowns/{id} {
+      allow read: if isPrivileged();
+      allow write: if false;
+    }
+  }
+}
