@@ -268,6 +268,72 @@ export default function ConnectorsPage() {
           same endpoint under the hood.
         </p>
       </section>
+
+      <DangerZone idToken={idToken} userEmail={user.email} />
     </main>
+  );
+}
+
+function DangerZone({
+  idToken,
+  userEmail,
+}: {
+  idToken: string | null;
+  userEmail: string | null;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const onDeleteAccount = async () => {
+    if (!idToken || !userEmail) return;
+    const confirm = window.prompt(
+      `This will permanently delete your account and ALL your documents and API keys. Type "${userEmail}" to confirm.`,
+    );
+    if (confirm !== userEmail) {
+      if (confirm !== null) alert("Email didn't match — deletion cancelled.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch("/api/me/account", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || json.error);
+      setDone(true);
+      // Sign-out + redirect home after a beat.
+      setTimeout(() => {
+        window.location.href = "/";
+      }, 2500);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Deletion failed");
+      setBusy(false);
+    }
+  };
+
+  if (done) {
+    return (
+      <section className="mt-10 rounded-lg border border-red-200 bg-red-50 p-5 text-sm text-red-900">
+        Account deleted. Redirecting…
+      </section>
+    );
+  }
+
+  return (
+    <section className="mt-10 rounded-lg border border-red-200 p-5">
+      <h2 className="text-sm font-semibold text-red-700">Danger zone</h2>
+      <p className="mt-1 text-xs text-gray-600">
+        Permanently delete your account, all your documents, and all your
+        API keys. This cannot be undone.
+      </p>
+      <button
+        onClick={onDeleteAccount}
+        disabled={busy}
+        className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
+      >
+        {busy ? "Deleting…" : "Delete my account"}
+      </button>
+    </section>
   );
 }
