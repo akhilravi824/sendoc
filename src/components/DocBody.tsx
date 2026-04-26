@@ -1,19 +1,68 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 // Detects whether content is a full HTML document (starts with <!doctype html>
 // or <html ...>). Anything else is treated as Markdown.
-//
-// We render full HTML docs inside a sandboxed iframe via srcdoc so the
-// document's <style>, <body>, <iframe> etc. all work as the author
-// intended without leaking styles into sendoc's chrome — and without
-// letting the document's <script> run in our origin.
 export function isHtmlDocument(content: string): boolean {
-  if (!content) return false;
+  if (!content || typeof content !== "string") return false;
   const head = content.trimStart().slice(0, 200).toLowerCase();
   return head.startsWith("<!doctype html") || /^<html[\s>]/.test(head);
+}
+
+// Injects <base target="_blank"> into the HTML so links inside the
+// sandboxed iframe open in a new tab (lets sandbox=allow-popups work
+// without losing the share page when clicking links).
+function injectBaseTarget(html: string): string {
+  const baseTag = `<base target="_blank" rel="noopener">`;
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head[^>]*>/i, (m) => `${m}${baseTag}`);
+  }
+  if (/<html[^>]*>/i.test(html)) {
+    return html.replace(/<html[^>]*>/i, (m) => `${m}<head>${baseTag}</head>`);
+  }
+  return `<head>${baseTag}</head>${html}`;
+}
+
+function HtmlDocFrame({ title, content }: { title: string; content: string }) {
+  const ref = useRef<HTMLIFrameElement | null>(null);
+  const [height, setHeight] = useState<number>(800);
+
+  // Measure the iframe's actual content height so we don't show a
+  // scrolled letterbox. Browsers block reading contentDocument across
+  // sandboxed origins, so we wrap in try/catch and fall back to a
+  // generous min-height.
+  useEffect(() => {
+    const iframe = ref.current;
+    if (!iframe) return;
+    const measure = () => {
+      try {
+        const h = iframe.contentDocument?.documentElement?.scrollHeight;
+        if (h && h > 200) setHeight(h);
+      } catch {
+        // sandboxed — can't read; keep default height
+      }
+    };
+    iframe.addEventListener("load", measure);
+    return () => iframe.removeEventListener("load", measure);
+  }, [content]);
+
+  // sandbox="allow-popups allow-popups-to-escape-sandbox" — links open
+  // in new tabs (via injected <base target="_blank">), nested iframes
+  // (Google Maps) load from their own origin.
+  // No allow-scripts → XSS-safe.
+  return (
+    <iframe
+      ref={ref}
+      srcDoc={injectBaseTarget(content)}
+      sandbox="allow-popups allow-popups-to-escape-sandbox"
+      title={title}
+      style={{ height: `${height}px` }}
+      className="w-full rounded-lg border border-gray-200 bg-white"
+    />
+  );
 }
 
 export function DocBody({
@@ -24,19 +73,7 @@ export function DocBody({
   content: string;
 }) {
   if (isHtmlDocument(content)) {
-    // sandbox="allow-popups" — links can open new tabs; nested iframes
-    // (e.g., Google Maps embeds) load from their own origin so they're
-    // unaffected by our sandbox.
-    // Intentionally NOT including "allow-scripts" or "allow-same-origin"
-    // — that's the XSS protection.
-    return (
-      <iframe
-        srcDoc={content}
-        sandbox="allow-popups allow-popups-to-escape-sandbox"
-        title={title}
-        className="min-h-[80vh] w-full rounded-lg border border-gray-200 bg-white"
-      />
-    );
+    return <HtmlDocFrame title={title} content={content} />;
   }
 
   return (
