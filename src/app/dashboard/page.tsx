@@ -3,6 +3,11 @@
 
 "use client";
 
+// Force dynamic rendering — this page reads per-user Firebase auth, so
+// statically prerendering it at build time both fails (Firebase env vars
+// flaky in build env) and is pointless (no user yet).
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
