@@ -2,16 +2,24 @@
 
 import { useEffect, useRef, useState } from "react";
 
-// Share dropdown for the public share view. Three actions:
+// Share dropdown for the public share view. Four actions:
 // - Copy link → clipboard
 // - Email → opens mailto: in the user's email client (no backend needed —
 //   user enters recipients in their own email app)
+// - Make a copy → forks the doc into a new editable copy
 // - System share → only on devices with navigator.share (mobile mostly)
 
-export function SharePopover({ title }: { title: string }) {
+export function SharePopover({
+  title,
+  shareToken,
+}: {
+  title: string;
+  shareToken: string;
+}) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [hasNativeShare, setHasNativeShare] = useState(false);
+  const [forking, setForking] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -64,6 +72,24 @@ export function SharePopover({ title }: { title: string }) {
     setOpen(false);
   };
 
+  const onMakeCopy = async () => {
+    setForking(true);
+    try {
+      const res = await fetch(`/api/share/${shareToken}/copy`, {
+        method: "POST",
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.message || json.error || `HTTP ${res.status}`);
+      }
+      // Send the copier straight to their new editable copy.
+      window.location.href = json.editUrl;
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not copy this doc.");
+      setForking(false);
+    }
+  };
+
   return (
     <div ref={ref} className="relative">
       <button
@@ -88,6 +114,14 @@ export function SharePopover({ title }: { title: string }) {
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
           >
             <span aria-hidden>✉️</span> Email
+          </button>
+          <button
+            onClick={onMakeCopy}
+            disabled={forking}
+            className="flex w-full items-center gap-2 border-t border-gray-100 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+          >
+            <span aria-hidden>📋</span>
+            {forking ? "Copying…" : "Make a copy"}
           </button>
           {hasNativeShare && (
             <button

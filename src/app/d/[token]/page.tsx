@@ -112,7 +112,7 @@ export default function SharedDocPage() {
           <span className="hidden text-xs text-gray-400 sm:inline">
             Shared document · read-only
           </span>
-          <SharePopover title={doc.title} />
+          <SharePopover title={doc.title} shareToken={token} />
         </div>
       </header>
 
