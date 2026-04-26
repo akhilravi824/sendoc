@@ -150,9 +150,14 @@ export default function AdminPage() {
       </div>
       <header className="mb-6 flex items-center justify-between">
         <h1 className="text-xl font-semibold">Admin</h1>
-        <Link href="/dashboard" className="text-sm text-gray-500 hover:text-gray-900">
-          ← back to app
-        </Link>
+        <div className="flex items-center gap-4 text-sm">
+          <Link href="/admin/audits" className="text-gray-600 hover:text-gray-900">
+            Audit log →
+          </Link>
+          <Link href="/dashboard" className="text-gray-500 hover:text-gray-900">
+            ← back to app
+          </Link>
+        </div>
       </header>
 
       {stats && (
