@@ -72,3 +72,49 @@ export async function checkAndIncrementRateLimit(
     };
   });
 }
+
+/**
+ * Per-IP rolling-window rate limit. Used for unauthenticated endpoints
+ * like /api/reports where there's no UID to key on.
+ *
+ * Uses Firestore for the counter store. Window is in seconds; the bucket
+ * doc auto-expires via the same TTL field as user rate limits.
+ */
+export async function checkIpRateLimit(
+  ip: string,
+  bucket: string,
+  limit: number,
+  windowSeconds: number,
+): Promise<{ ok: boolean; retryAfter?: number }> {
+  if (!ip || ip === "unknown") {
+    // Without an IP we can't enforce — fail open but log.
+    return { ok: true };
+  }
+  const windowKey = Math.floor(Date.now() / (windowSeconds * 1000));
+  const ref = adminDb()
+    .collection("rateLimits")
+    .doc(`ip_${bucket}_${ip}_${windowKey}`);
+
+  return adminDb().runTransaction(async (tx: Transaction) => {
+    const snap = await tx.get(ref);
+    const current = (snap.exists ? snap.data()?.count : 0) || 0;
+    if (current >= limit) {
+      return {
+        ok: false,
+        retryAfter: windowSeconds - (Math.floor(Date.now() / 1000) % windowSeconds),
+      };
+    }
+    tx.set(
+      ref,
+      {
+        ip,
+        bucket,
+        count: current + 1,
+        updatedAt: new Date(),
+        expiresAt: new Date(Date.now() + windowSeconds * 2 * 1000),
+      },
+      { merge: true },
+    );
+    return { ok: true };
+  });
+}

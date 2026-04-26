@@ -11,6 +11,7 @@ import { NextRequest } from "next/server";
 import { adminDb, verifyIdToken } from "@/lib/firebase-admin";
 import { anthropic, DEFAULT_MODEL, SENDOC_SYSTEM_PROMPT } from "@/lib/anthropic";
 import { checkAndIncrementRateLimit } from "@/lib/rate-limit";
+import { moderate } from "@/lib/moderation";
 
 export const runtime = "nodejs";
 export const maxDuration = 60; // seconds — adjust on Vercel if you need longer
@@ -42,6 +43,28 @@ export async function POST(req: NextRequest) {
   }
   if (snap.data()?.ownerId !== decoded.uid) {
     return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 });
+  }
+
+  // Pre-prompt moderation. Cheap classifier rejects obviously harmful
+  // prompts before we spend Anthropic tokens or save anything.
+  const promptCheck = await moderate(prompt, "prompt");
+  if (promptCheck.flagged) {
+    await adminDb().collection("moderationFlags").add({
+      docId,
+      ownerId: decoded.uid,
+      source: "prompt",
+      category: promptCheck.category ?? null,
+      sample: prompt.slice(0, 500),
+      createdAt: new Date(),
+    });
+    return new Response(
+      JSON.stringify({
+        error: "MODERATION_BLOCKED",
+        message: "This prompt was blocked by our content policy.",
+        category: promptCheck.category,
+      }),
+      { status: 422, headers: { "Content-Type": "application/json" } },
+    );
   }
 
   // Rate limit BEFORE we hit Anthropic — this is the abuse defense.
@@ -110,6 +133,32 @@ export async function POST(req: NextRequest) {
           updatedAt: new Date(),
           "meta.wordCount": accumulated.split(/\s+/).filter(Boolean).length,
         });
+
+        // Post-output moderation. The user already saw the streamed text
+        // (we can't un-show it), but we DO want to prevent the share link
+        // from publishing flagged content. So if flagged, deactivate the
+        // share link + mark the doc as removed.
+        const outputCheck = await moderate(accumulated, "output");
+        if (outputCheck.flagged) {
+          await docRef.update({
+            "shareLink.active": false,
+            status: "removed",
+            updatedAt: new Date(),
+          });
+          await adminDb().collection("moderationFlags").add({
+            docId,
+            ownerId: decoded.uid,
+            source: "output",
+            category: outputCheck.category ?? null,
+            sample: accumulated.slice(0, 500),
+            createdAt: new Date(),
+          });
+          controller.enqueue(
+            encoder.encode(
+              `\n\n[sendoc: this output was flagged by our content policy and the share link has been disabled.]`,
+            ),
+          );
+        }
 
         controller.close();
       } catch (e) {
