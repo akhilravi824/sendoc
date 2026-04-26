@@ -58,5 +58,17 @@ service cloud.firestore {
       allow read: if isPrivileged();
       allow write: if false;
     }
+
+    // API keys for the connector backend. All access is server-side
+    // (Admin SDK) — clients never query this collection directly.
+    match /apiKeys/{keyId} {
+      allow read, write: if false;
+    }
+
+    // Moderation flags from /api/external/docs and /api/generate.
+    match /moderationFlags/{id} {
+      allow read: if isPrivileged();
+      allow write: if false;
+    }
   }
 }
