@@ -78,13 +78,17 @@ export async function GET() {
                       shareUrl: {
                         type: "string",
                         description:
-                          "Public URL — anyone with this link can read the document.",
+                          "Public read URL — anyone with this link can VIEW the document. Share this with viewers.",
+                      },
+                      editUrl: {
+                        type: "string",
+                        description:
+                          "Public edit URL — anyone with this link can EDIT the document. Share this only with collaborators the user trusts.",
                       },
                       editToken: {
                         type: "string",
                         description:
-                          "Secret token allowing the doc to be edited or claimed later. " +
-                          "Show to the user but warn them to save it.",
+                          "Raw edit token (for programmatic API access — most callers should use editUrl instead).",
                       },
                     },
                   },

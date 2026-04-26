@@ -163,9 +163,8 @@ export async function POST(req: NextRequest) {
       title,
       source,
       shareUrl: `${appUrl}/d/${linkToken}`,
+      editUrl: `${appUrl}/edit/${editTok.plaintext}`,
       editToken: editTok.plaintext,
-      // Future: callers can hit POST /api/publish/<docId>/claim with this
-      // editToken to take ownership of the doc after signing in.
     },
     { status: 201 },
   );

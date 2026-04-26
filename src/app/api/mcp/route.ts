@@ -96,8 +96,8 @@ async function callPublish(
         type: "text",
         text:
           `✓ Published to sendoc.\n\n` +
-          `Share URL: ${json.shareUrl}\n\n` +
-          `Save this editToken to edit the doc later: ${json.editToken}`,
+          `📖 Public read URL (share this with viewers):\n${json.shareUrl}\n\n` +
+          `✏️ Edit URL (share only with collaborators you trust — anyone with this URL can edit):\n${json.editUrl}`,
       },
     ],
   };
