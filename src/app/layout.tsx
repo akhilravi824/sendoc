@@ -3,9 +3,39 @@ import type { Metadata } from "next";
 import { AuthProvider } from "@/components/AuthProvider";
 
 export const metadata: Metadata = {
-  title: "sendoc — AI documents you can share instantly",
+  title: {
+    default: "sendoc — Publish AI conversations as shareable links",
+    template: "%s · sendoc",
+  },
   description:
-    "Generate a document with AI, share it via secure link, collaborate in real time. Identity-gated access — works with Claude, GPT-4, and more.",
+    "Sendoc is the publishing layer for ChatGPT and Claude. Tell your AI to publish — get back a public URL anyone can open. No accounts, no setup.",
+  applicationName: "sendoc",
+  authors: [{ name: "sendoc" }],
+  keywords: [
+    "sendoc",
+    "AI",
+    "ChatGPT",
+    "Claude",
+    "MCP",
+    "publish",
+    "share",
+    "document",
+    "connector",
+  ],
+  openGraph: {
+    type: "website",
+    title: "sendoc — Publish AI conversations as shareable links",
+    description:
+      "Tell ChatGPT or Claude to publish to sendoc. Get back a public URL anyone can open.",
+    siteName: "sendoc",
+  },
+  twitter: {
+    card: "summary",
+    title: "sendoc",
+    description:
+      "Publish AI conversations as shareable links — works with ChatGPT and Claude.",
+  },
+  themeColor: "#5b8def",
 };
 
 export default function RootLayout({
