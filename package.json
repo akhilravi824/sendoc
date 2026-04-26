@@ -13,12 +13,15 @@
     "@anthropic-ai/sdk": "^0.32.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@sentry/nextjs": "^10.50.0",
+    "@tailwindcss/typography": "^0.5.19",
     "csstype": "^3.2.3",
     "firebase": "^11.10.0",
     "firebase-admin": "^13.8.0",
     "next": "^14.2.15",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "uuid": "^11.0.3"
   },
   "devDependencies": {

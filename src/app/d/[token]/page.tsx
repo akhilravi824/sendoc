@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type SharedDoc = {
   title: string;
@@ -101,10 +103,10 @@ export default function SharedDocPage() {
         </Link>
         <span className="text-xs text-gray-400">Shared document · read-only</span>
       </header>
-      <h1 className="mb-6 text-2xl font-semibold">{doc.title}</h1>
-      <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed text-gray-800">
-        {doc.content}
-      </pre>
+      <article className="prose prose-gray prose-headings:font-semibold prose-h1:mb-6 prose-h1:text-3xl prose-a:text-brand prose-a:no-underline hover:prose-a:underline prose-code:rounded prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:text-sm prose-code:before:content-none prose-code:after:content-none prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-img:rounded-lg max-w-none">
+        <h1>{doc.title}</h1>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{doc.content}</ReactMarkdown>
+      </article>
       <footer className="mt-12 flex items-center justify-between border-t border-gray-100 pt-4 text-xs text-gray-400">
         <span>
           Made with{" "}
