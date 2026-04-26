@@ -27,6 +27,9 @@ type DocSummary = {
   docId: string;
   title: string;
   updatedAt?: { toDate: () => Date };
+  meta?: { mode?: string };
+  shareLink?: { token?: string; active?: boolean };
+  status?: string;
 };
 
 export default function Dashboard() {
@@ -69,13 +72,23 @@ export default function Dashboard() {
               : `Hi ${user.displayName?.split(" ")[0] ?? "there"}`}
           </h1>
         </div>
-        {isAnonymous ? (
-          <Link href="/login" className="text-sm text-brand hover:underline">
-            Sign in
-          </Link>
-        ) : (
-          <SignOutButton />
-        )}
+        <div className="flex items-center gap-4 text-sm">
+          {!isAnonymous && (
+            <Link
+              href="/settings/connectors"
+              className="text-gray-600 hover:text-gray-900"
+            >
+              Connectors
+            </Link>
+          )}
+          {isAnonymous ? (
+            <Link href="/login" className="text-brand hover:underline">
+              Sign in
+            </Link>
+          ) : (
+            <SignOutButton />
+          )}
+        </div>
       </header>
 
       {/* Anonymous-only banner — disappears once user upgrades to Google */}
@@ -100,23 +113,45 @@ export default function Dashboard() {
           </p>
         ) : (
           <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
-            {docs.map((d) => (
-              <li key={d.docId}>
-                <Link
-                  href={`/doc/${d.docId}`}
-                  className="flex items-center justify-between px-4 py-3 hover:bg-gray-50"
-                >
-                  <span className="truncate font-medium">
-                    {d.title || "Untitled"}
-                  </span>
-                  <span className="ml-4 shrink-0 text-xs text-gray-400">
-                    {d.updatedAt
-                      ? d.updatedAt.toDate().toLocaleString()
-                      : ""}
-                  </span>
-                </Link>
-              </li>
-            ))}
+            {docs.map((d) => {
+              const isApi = d.meta?.mode === "external_publish";
+              const isCopy = d.meta?.mode === "anonymous_copy";
+              const removed = d.status && d.status !== "active";
+              return (
+                <li key={d.docId}>
+                  <Link
+                    href={`/doc/${d.docId}`}
+                    className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-gray-50"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate font-medium">
+                          {d.title || "Untitled"}
+                        </span>
+                        {isApi && (
+                          <span className="rounded bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-brand">
+                            API
+                          </span>
+                        )}
+                        {isCopy && (
+                          <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-600">
+                            Copy
+                          </span>
+                        )}
+                        {removed && (
+                          <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-red-800">
+                            Removed
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="shrink-0 text-xs text-gray-400">
+                      {d.updatedAt ? d.updatedAt.toDate().toLocaleString() : ""}
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
