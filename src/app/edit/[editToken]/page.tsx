@@ -3,8 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { DocBody, isHtmlDocument } from "@/components/DocBody";
 
 type EditDoc = {
   docId: string;
@@ -213,18 +212,18 @@ export default function EditPage() {
           />
         )}
         {(view === "preview" || view === "split") && (
-          <div className="min-h-[60vh] overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-6">
-            <article className="prose prose-gray prose-headings:font-semibold prose-h1:mb-6 prose-h1:text-3xl prose-a:text-brand prose-a:no-underline hover:prose-a:underline prose-code:rounded prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:text-sm prose-code:before:content-none prose-code:after:content-none prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-img:rounded-lg max-w-none">
-              {doc.content ? (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {doc.content}
-                </ReactMarkdown>
-              ) : (
-                <p className="text-gray-400">
-                  Preview will appear here as you write.
-                </p>
-              )}
-            </article>
+          <div
+            className={`min-h-[60vh] overflow-auto rounded-lg border border-gray-200 ${
+              isHtmlDocument(doc.content) ? "bg-white p-0" : "bg-gray-50 p-6"
+            }`}
+          >
+            {doc.content ? (
+              <DocBody title={doc.title || "Untitled"} content={doc.content} />
+            ) : (
+              <p className="p-6 text-gray-400">
+                Preview will appear here as you write.
+              </p>
+            )}
           </div>
         )}
       </div>

@@ -3,50 +3,14 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { DocBody, isHtmlDocument } from "@/components/DocBody";
+import { SharePopover } from "@/components/SharePopover";
 
 type SharedDoc = {
   title: string;
   content: string;
   updatedAt: number | null;
 };
-
-function ShareButton({ title }: { title: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const onShare = async () => {
-    if (typeof window === "undefined") return;
-    const url = window.location.href;
-    // Native share sheet on mobile (iOS/Android), falls back to clipboard
-    // on desktop where most browsers don't expose navigator.share.
-    if (typeof navigator !== "undefined" && "share" in navigator) {
-      try {
-        await navigator.share({ title, url });
-        return;
-      } catch {
-        // user cancelled — fall through to clipboard so the affordance still does something
-      }
-    }
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    } catch {
-      // clipboard blocked — last resort: prompt
-      window.prompt("Copy this URL:", url);
-    }
-  };
-
-  return (
-    <button
-      onClick={onShare}
-      className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
-    >
-      {copied ? "Copied!" : "Share"}
-    </button>
-  );
-}
 
 function ReportButton({ token }: { token: string }) {
   const [state, setState] = useState<"idle" | "sending" | "sent">("idle");
@@ -131,8 +95,15 @@ export default function SharedDocPage() {
     );
   }
 
+  // HTML documents take the full page width to do justice to their layout.
+  // Markdown stays in a comfortable reading column.
+  const isHtml = isHtmlDocument(doc.content);
+  const wrapClass = isHtml
+    ? "mx-auto max-w-6xl px-4 py-6"
+    : "mx-auto max-w-3xl px-6 py-8";
+
   return (
-    <main className="mx-auto max-w-3xl px-6 py-8">
+    <main className={wrapClass}>
       <header className="mb-6 flex items-center justify-between gap-3 border-b border-gray-100 pb-4">
         <Link href="/" className="text-sm font-medium text-gray-700 hover:text-gray-900">
           sendoc
@@ -141,13 +112,16 @@ export default function SharedDocPage() {
           <span className="hidden text-xs text-gray-400 sm:inline">
             Shared document · read-only
           </span>
-          <ShareButton title={doc.title} />
+          <SharePopover title={doc.title} />
         </div>
       </header>
-      <article className="prose prose-gray prose-headings:font-semibold prose-h1:mb-6 prose-h1:text-3xl prose-a:text-brand prose-a:no-underline hover:prose-a:underline prose-code:rounded prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:text-sm prose-code:before:content-none prose-code:after:content-none prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-img:rounded-lg max-w-none">
-        <h1>{doc.title}</h1>
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{doc.content}</ReactMarkdown>
-      </article>
+
+      {isHtml && (
+        <h1 className="mb-4 text-2xl font-semibold text-gray-900">{doc.title}</h1>
+      )}
+
+      <DocBody title={doc.title} content={doc.content} />
+
       <footer className="mt-12 flex items-center justify-between border-t border-gray-100 pt-4 text-xs text-gray-400">
         <span>
           Made with{" "}
