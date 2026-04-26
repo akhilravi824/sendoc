@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type EditDoc = {
   docId: string;
@@ -11,6 +13,8 @@ type EditDoc = {
   shareUrl: string;
   updatedAt: number | null;
 };
+
+type EditView = "split" | "edit" | "preview";
 
 export default function EditPage() {
   const { editToken } = useParams<{ editToken: string }>();
@@ -21,6 +25,7 @@ export default function EditPage() {
   const [copied, setCopied] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleted, setDeleted] = useState(false);
+  const [view, setView] = useState<EditView>("split");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -147,12 +152,30 @@ export default function EditPage() {
   }
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-8">
-      <div className="mb-4 flex items-center justify-between text-xs">
+    <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+      <div className="mb-4 flex items-center justify-between gap-3 text-xs">
         <Link href="/" className="text-gray-500 hover:text-gray-900">
           ← sendoc
         </Link>
-        <span className="text-gray-400">
+
+        {/* View toggle: edit | split | preview */}
+        <div className="inline-flex items-center rounded-lg border border-gray-200 bg-white p-0.5 text-xs">
+          {(["edit", "split", "preview"] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={`rounded px-2.5 py-1 capitalize transition ${
+                view === v
+                  ? "bg-gray-900 text-white"
+                  : "text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+
+        <span className="hidden min-w-[120px] text-right text-gray-400 sm:inline">
           {saving
             ? "Saving…"
             : savedAt
@@ -176,11 +199,35 @@ export default function EditPage() {
         className="mb-4 w-full bg-transparent text-2xl font-semibold focus:outline-none"
       />
 
-      <textarea
-        value={doc.content}
-        onChange={(e) => onContentChange(e.target.value)}
-        className="min-h-[60vh] w-full resize-none rounded-lg border border-gray-200 bg-white p-6 font-mono text-sm leading-relaxed text-gray-800 shadow-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
-      />
+      <div
+        className={`grid gap-4 ${
+          view === "split" ? "lg:grid-cols-2" : "grid-cols-1"
+        }`}
+      >
+        {(view === "edit" || view === "split") && (
+          <textarea
+            value={doc.content}
+            onChange={(e) => onContentChange(e.target.value)}
+            className="min-h-[60vh] w-full resize-none rounded-lg border border-gray-200 bg-white p-6 font-mono text-sm leading-relaxed text-gray-800 shadow-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
+            placeholder="Start writing in Markdown…"
+          />
+        )}
+        {(view === "preview" || view === "split") && (
+          <div className="min-h-[60vh] overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-6">
+            <article className="prose prose-gray prose-headings:font-semibold prose-h1:mb-6 prose-h1:text-3xl prose-a:text-brand prose-a:no-underline hover:prose-a:underline prose-code:rounded prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:text-sm prose-code:before:content-none prose-code:after:content-none prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-img:rounded-lg max-w-none">
+              {doc.content ? (
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {doc.content}
+                </ReactMarkdown>
+              ) : (
+                <p className="text-gray-400">
+                  Preview will appear here as you write.
+                </p>
+              )}
+            </article>
+          </div>
+        )}
+      </div>
 
       {error && (
         <div className="mt-3 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-800">
