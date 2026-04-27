@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { DocBody, isHtmlDocument } from "@/components/DocBody";
+import { AskAIModal } from "@/components/AskAIModal";
 
 type EditDoc = {
   docId: string;
@@ -25,6 +26,7 @@ export default function EditPage() {
   const [deleting, setDeleting] = useState(false);
   const [deleted, setDeleted] = useState(false);
   const [view, setView] = useState<EditView>("split");
+  const [askAIOpen, setAskAIOpen] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -89,6 +91,12 @@ export default function EditPage() {
     await navigator.clipboard.writeText(doc.shareUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  };
+
+  const onAIApply = (newContent: string) => {
+    if (!doc) return;
+    setDoc({ ...doc, content: newContent });
+    queueSave({ content: newContent });
   };
 
   const onCopyEdit = async () => {
@@ -174,13 +182,21 @@ export default function EditPage() {
           ))}
         </div>
 
-        <span className="hidden min-w-[120px] text-right text-gray-400 sm:inline">
-          {saving
-            ? "Saving…"
-            : savedAt
-              ? `Saved ${new Date(savedAt).toLocaleTimeString()}`
-              : ""}
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setAskAIOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-brand-dark"
+          >
+            <span aria-hidden>✨</span> Ask AI
+          </button>
+          <span className="hidden min-w-[120px] text-right text-gray-400 sm:inline">
+            {saving
+              ? "Saving…"
+              : savedAt
+                ? `Saved ${new Date(savedAt).toLocaleTimeString()}`
+                : ""}
+          </span>
+        </div>
       </div>
 
       <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
@@ -283,6 +299,13 @@ export default function EditPage() {
           {deleting ? "Deleting…" : "Delete this document"}
         </button>
       </div>
+
+      <AskAIModal
+        open={askAIOpen}
+        onClose={() => setAskAIOpen(false)}
+        editToken={editToken}
+        onApply={onAIApply}
+      />
     </main>
   );
 }
