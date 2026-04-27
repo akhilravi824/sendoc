@@ -18,9 +18,10 @@ Realistic timeline: **6–12 months**. Most of the work is distribution + compli
                  HTML render (sandboxed) · Share dropdown · Make-a-copy
                  Admin moderation v2 · Audit log + viewer · Privacy/Terms
                  Landing page · Branding · Sentry · CI · GDPR delete
+                 AI-edit on shared docs (Ask AI button on /edit) ⭐ NEW
 
 ⚠️ Half-done    Identity-gated ACL  (token-only today)
-                 Multi-model AI       (Claude only)
+                 Multi-model AI       (Claude only — Ask AI ships on Claude)
                  Link TTL enforcement (field exists, not enforced)
                  Per-user plans       (rate limits hardcoded, no plan tiers)
 
@@ -86,7 +87,8 @@ Realistic timeline: **6–12 months**. Most of the work is distribution + compli
 |---|---|---|---|---|
 | 🟢 P2 | **Multi-model adapter pattern** (Claude / GPT-4 / Gemini / BYO-key) | 3–4 hrs | me | OpenAI + Google AI keys (Akhil) |
 | 🟢 P2 | **Model picker UI** for Pro tier | 1 hr | me | After plans exist |
-| 🟢 P3 | **Inline AI** — select text → "rewrite / summarize / expand" | 4 hrs | me | After Tiptap (Lane 4) |
+| ✅ Done | ~~**Ask AI on shared edit URL** — collaborator opens edit URL, clicks Ask AI, types instruction (e.g. "add hotel section"), AI rewrites the doc, user previews + applies~~ — shipped 2026-04-26 | — | me | — |
+| 🟢 P3 | **Inline AI** — select text → "rewrite / summarize / expand" (selection-aware, not whole-doc) | 4 hrs | me | After Tiptap (Lane 4) |
 | 🟢 P3 | **AI suggestions as tracked changes** | 1 day | me | After inline AI |
 | 🟢 P3 | **Prompt caching** to reduce Anthropic costs | 2 hrs | me | None — nice-to-have |
 | 🟢 P3 | **AI usage dashboard** for users (tokens used, cost) | 3 hrs | me | After multi-model |
@@ -158,6 +160,7 @@ After those three, re-evaluate against the [vision memory](../../../.claude/proj
 - **2026-04-26**: Pivoted from CollabAI spec (Google-Docs-with-AI) → sendoc connector (publishing layer for ChatGPT/Claude). Reasoning: clearer differentiation, lower AI cost (users pay), easier distribution (GPT Store + MCP marketplace exist).
 - **2026-04-26**: Chose **token-gated edit URLs** instead of identity-gated ACL for v1. Anonymous-publish UX matters more than per-user permissions when most flows go through ChatGPT/Claude where there's no sendoc identity.
 - **2026-04-26**: HTML rendering uses sandboxed iframe (`sandbox="allow-popups"`, no scripts). Per-doc subdomain isolation deferred until custom domain.
+- **2026-04-26**: Added **whole-doc AI editing** on `/edit/[editToken]`. The AI gets the full current doc + the user's instruction and outputs a complete updated doc; the user previews and applies. Chose this over selection-aware inline AI (Notion-style) because it's simpler, doesn't require Tiptap, and covers the most common use case ("add a section" / "make this concise" / "translate"). Inline AI stays in Lane 5 P3 for after Tiptap lands.
 
 ---
 
