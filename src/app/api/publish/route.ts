@@ -25,7 +25,9 @@ import { v4 as uuidv4 } from "uuid";
 import crypto from "node:crypto";
 import { adminDb } from "@/lib/firebase-admin";
 import { moderate } from "@/lib/moderation";
-import { checkIpRateLimit } from "@/lib/rate-limit";
+import { checkIpRateLimit, rateLimitHeaders } from "@/lib/rate-limit";
+import { pepperedHash } from "@/lib/secret-hash";
+import { logAction } from "@/lib/audit/action";
 
 export const runtime = "nodejs";
 
@@ -43,7 +45,7 @@ function generateEditToken(): { plaintext: string; hash: string } {
   }
   return {
     plaintext: body,
-    hash: crypto.createHash("sha256").update(body).digest("hex"),
+    hash: pepperedHash(body),
   };
 }
 
@@ -60,7 +62,7 @@ export async function POST(req: NextRequest) {
         message: "Too many publishes from this IP. Try again later.",
         retryAfter: rl.retryAfter,
       },
-      { status: 429, headers: { "Retry-After": String(rl.retryAfter ?? 3600) } },
+      { status: 429, headers: rateLimitHeaders(rl) },
     );
   }
 
@@ -151,6 +153,17 @@ export async function POST(req: NextRequest) {
       },
     });
 
+  logAction({
+    action: "doc.publish",
+    actor: {
+      type: "anonymous",
+      ip,
+      userAgent: req.headers.get("user-agent"),
+    },
+    docId,
+    meta: { source, contentSize: content.length },
+  });
+
   const appUrl =
     process.env.NEXT_PUBLIC_APP_URL ||
     (req.headers.get("x-forwarded-proto") && req.headers.get("host")
@@ -166,6 +179,6 @@ export async function POST(req: NextRequest) {
       editUrl: `${appUrl}/edit/${editTok.plaintext}`,
       editToken: editTok.plaintext,
     },
-    { status: 201 },
+    { status: 201, headers: rateLimitHeaders(rl) },
   );
 }

@@ -12,11 +12,9 @@ const nextConfig = {
 
 // Sentry build-time config. Sourcemaps + tunnel route to dodge ad blockers.
 module.exports = withSentryConfig(nextConfig, {
-  // Suppresses source map upload logs during build (cleaner CI output).
   silent: true,
-  // Routes browser-side error reports through your own /monitoring/ path
-  // so ad blockers don't drop them.
   tunnelRoute: "/monitoring",
-  hideSourceMaps: true,
-  disableLogger: true,
+  webpack: {
+    treeshake: { removeDebugLogging: true },
+  },
 });

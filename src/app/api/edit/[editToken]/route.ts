@@ -6,13 +6,16 @@
 // DELETE /api/edit/[editToken] → soft-removes the doc
 //
 // editToken is the plaintext returned by /api/publish at creation time.
-// The server stores SHA-256 of it, compares hashes, never the plaintext.
+// The server stores HMAC-SHA-256(API_KEY_PEPPER, token), compares hashes,
+// never the plaintext. See src/lib/secret-hash.ts.
 
 import { NextRequest, NextResponse } from "next/server";
-import crypto from "node:crypto";
 import { adminDb } from "@/lib/firebase-admin";
 import { moderate } from "@/lib/moderation";
-import { checkIpRateLimit } from "@/lib/rate-limit";
+import { checkIpRateLimit, rateLimitHeaders } from "@/lib/rate-limit";
+import { lookupHashes, pepperedHash } from "@/lib/secret-hash";
+import { logAction } from "@/lib/audit/action";
+import { expiryFor, isExpired } from "@/lib/link-ttl";
 
 export const runtime = "nodejs";
 
@@ -22,20 +25,24 @@ function getClientIp(req: NextRequest): string {
   return req.headers.get("x-real-ip") || "unknown";
 }
 
-function hashEditToken(token: string): string {
-  return crypto.createHash("sha256").update(token).digest("hex");
-}
-
 async function findDocByEditToken(editToken: string) {
-  const hash = hashEditToken(editToken);
+  const [newHash, oldHash] = lookupHashes(editToken);
   const snap = await adminDb()
     .collection("docs")
-    .where("editTokenHash", "==", hash)
+    .where("editTokenHash", "in", [newHash, oldHash])
     .limit(1)
     .get();
   if (snap.empty) return null;
   const doc = snap.docs[0];
-  return { ref: doc.ref, data: doc.data() };
+  const data = doc.data();
+  // Opportunistically rotate legacy hashes so the migration completes
+  // organically as docs are touched.
+  if (data.editTokenHash !== newHash) {
+    doc.ref
+      .update({ editTokenHash: pepperedHash(editToken) })
+      .catch(() => undefined);
+  }
+  return { ref: doc.ref, data };
 }
 
 function getAppUrl(req: NextRequest): string {
@@ -53,6 +60,16 @@ export async function GET(
   if (!found || found.data.status !== "active") {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+  if (isExpired(found.data)) {
+    return NextResponse.json(
+      {
+        error: "EXPIRED",
+        message:
+          "This edit link has expired. Anonymous docs are removed after 7 days unless claimed.",
+      },
+      { status: 410 },
+    );
+  }
   const appUrl = getAppUrl(req);
   return NextResponse.json({
     docId: found.data.docId,
@@ -61,6 +78,9 @@ export async function GET(
     shareUrl: `${appUrl}/d/${found.data.shareLink?.token ?? ""}`,
     source: found.data.meta?.source ?? null,
     updatedAt: found.data.updatedAt?.toMillis?.() ?? null,
+    ownerId: found.data.ownerId ?? null,
+    ownerEmail: found.data.ownerEmail ?? null,
+    expiresAt: expiryFor(found.data),
   });
 }
 
@@ -75,13 +95,16 @@ export async function PATCH(
   if (!rl.ok) {
     return NextResponse.json(
       { error: "RATE_LIMIT", retryAfter: rl.retryAfter },
-      { status: 429 },
+      { status: 429, headers: rateLimitHeaders(rl) },
     );
   }
 
   const found = await findDocByEditToken(params.editToken);
   if (!found || found.data.status !== "active") {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  if (isExpired(found.data)) {
+    return NextResponse.json({ error: "EXPIRED" }, { status: 410 });
   }
 
   let body: { title?: string; content?: string };
@@ -129,11 +152,34 @@ export async function PATCH(
   }
 
   await found.ref.update(update);
+
+  // Build a per-edit actor based on what we know. If a doc has an
+  // ownerId, attribute the edit to that user; otherwise it's anonymous.
+  const ownerUid = found.data.ownerId ?? null;
+  logAction({
+    action: "doc.edit",
+    actor: ownerUid
+      ? {
+          type: "user",
+          uid: ownerUid,
+          email: found.data.ownerEmail ?? null,
+          ip,
+          userAgent: req.headers.get("user-agent"),
+        }
+      : { type: "anonymous", ip, userAgent: req.headers.get("user-agent") },
+    docId: found.data.docId,
+    meta: {
+      titleChanged: typeof body.title === "string",
+      contentChanged: typeof body.content === "string",
+      contentSize:
+        typeof body.content === "string" ? body.content.length : null,
+    },
+  });
   return NextResponse.json({ ok: true, updatedAt: Date.now() });
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { editToken: string } },
 ) {
   const found = await findDocByEditToken(params.editToken);
@@ -144,6 +190,21 @@ export async function DELETE(
     status: "removed",
     "shareLink.active": false,
     updatedAt: new Date(),
+  });
+  const ip = getClientIp(req);
+  const ownerUid = found.data.ownerId ?? null;
+  logAction({
+    action: "doc.delete",
+    actor: ownerUid
+      ? {
+          type: "user",
+          uid: ownerUid,
+          email: found.data.ownerEmail ?? null,
+          ip,
+          userAgent: req.headers.get("user-agent"),
+        }
+      : { type: "anonymous", ip, userAgent: req.headers.get("user-agent") },
+    docId: found.data.docId,
   });
   return NextResponse.json({ ok: true });
 }

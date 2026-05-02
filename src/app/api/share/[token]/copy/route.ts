@@ -9,7 +9,10 @@ import { v4 as uuidv4 } from "uuid";
 import crypto from "node:crypto";
 import { adminDb } from "@/lib/firebase-admin";
 import { moderate } from "@/lib/moderation";
-import { checkIpRateLimit } from "@/lib/rate-limit";
+import { checkIpRateLimit, rateLimitHeaders } from "@/lib/rate-limit";
+import { pepperedHash } from "@/lib/secret-hash";
+import { logAction } from "@/lib/audit/action";
+import { isExpired } from "@/lib/link-ttl";
 
 export const runtime = "nodejs";
 
@@ -27,7 +30,7 @@ function generateEditToken(): { plaintext: string; hash: string } {
   }
   return {
     plaintext: body,
-    hash: crypto.createHash("sha256").update(body).digest("hex"),
+    hash: pepperedHash(body),
   };
 }
 
@@ -45,7 +48,7 @@ export async function POST(
         error: "RATE_LIMIT",
         message: "Too many copies from this IP. Try again later.",
       },
-      { status: 429, headers: { "Retry-After": String(rl.retryAfter ?? 3600) } },
+      { status: 429, headers: rateLimitHeaders(rl) },
     );
   }
 
@@ -65,6 +68,15 @@ export async function POST(
   const source = snap.docs[0].data();
   if (source.shareLink?.active === false || source.status !== "active") {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  if (isExpired(source)) {
+    return NextResponse.json(
+      {
+        error: "EXPIRED",
+        message: "Source doc has expired and can't be copied.",
+      },
+      { status: 410 },
+    );
   }
 
   const content: string = source.content ?? "";
@@ -125,6 +137,17 @@ export async function POST(
         copiedFrom: source.docId ?? null,
       },
     });
+
+  logAction({
+    action: "doc.copy",
+    actor: {
+      type: "anonymous",
+      ip,
+      userAgent: req.headers.get("user-agent"),
+    },
+    docId,
+    meta: { copiedFrom: source.docId ?? null, contentSize: content.length },
+  });
 
   const appUrl =
     process.env.NEXT_PUBLIC_APP_URL ||

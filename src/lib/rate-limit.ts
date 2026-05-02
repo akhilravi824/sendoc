@@ -18,7 +18,7 @@ const LIMITS = {
 } as const;
 
 export type RateLimitResult =
-  | { ok: true; remaining: number; limit: number }
+  | { ok: true; remaining: number; limit: number; resetAt: Date }
   | { ok: false; remaining: 0; limit: number; resetAt: Date };
 
 function todayKey(): string {
@@ -34,15 +34,17 @@ export async function checkAndIncrementRateLimit(
   const day = todayKey();
   const ref = adminDb().collection("rateLimits").doc(`${uid}_${day}`);
 
+  // Both branches share a "midnight UTC tomorrow" reset. Compute once.
+  const tomorrow = new Date();
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  tomorrow.setUTCHours(0, 0, 0, 0);
+
   // Atomic increment with Firestore transaction.
   return adminDb().runTransaction(async (tx: Transaction) => {
     const snap = await tx.get(ref);
     const current = (snap.exists ? snap.data()?.count : 0) || 0;
 
     if (current >= limit) {
-      const tomorrow = new Date();
-      tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-      tomorrow.setUTCHours(0, 0, 0, 0);
       return {
         ok: false as const,
         remaining: 0,
@@ -69,9 +71,18 @@ export async function checkAndIncrementRateLimit(
       ok: true as const,
       remaining: limit - (current + 1),
       limit,
+      resetAt: tomorrow,
     };
   });
 }
+
+export type IpRateLimitResult = {
+  ok: boolean;
+  remaining: number;
+  limit: number;
+  resetAt: Date;
+  retryAfter?: number;
+};
 
 /**
  * Per-IP rolling-window rate limit. Used for unauthenticated endpoints
@@ -85,10 +96,14 @@ export async function checkIpRateLimit(
   bucket: string,
   limit: number,
   windowSeconds: number,
-): Promise<{ ok: boolean; retryAfter?: number }> {
+): Promise<IpRateLimitResult> {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const resetAt = new Date(
+    (Math.floor(nowSec / windowSeconds) + 1) * windowSeconds * 1000,
+  );
   if (!ip || ip === "unknown") {
-    // Without an IP we can't enforce — fail open but log.
-    return { ok: true };
+    // Without an IP we can't enforce — fail open but report headroom.
+    return { ok: true, remaining: limit, limit, resetAt };
   }
   const windowKey = Math.floor(Date.now() / (windowSeconds * 1000));
   const ref = adminDb()
@@ -101,7 +116,10 @@ export async function checkIpRateLimit(
     if (current >= limit) {
       return {
         ok: false,
-        retryAfter: windowSeconds - (Math.floor(Date.now() / 1000) % windowSeconds),
+        remaining: 0,
+        limit,
+        resetAt,
+        retryAfter: windowSeconds - (nowSec % windowSeconds),
       };
     }
     tx.set(
@@ -115,6 +133,27 @@ export async function checkIpRateLimit(
       },
       { merge: true },
     );
-    return { ok: true };
+    return {
+      ok: true,
+      remaining: limit - (current + 1),
+      limit,
+      resetAt,
+    };
   });
+}
+
+// Standard rate-limit headers (RFC 6585 inspired, GitHub/Stripe shape).
+// Pass to Response constructors so API consumers can self-throttle.
+export function rateLimitHeaders(
+  rl: { limit: number; remaining: number; resetAt: Date; retryAfter?: number },
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    "X-RateLimit-Limit": String(rl.limit),
+    "X-RateLimit-Remaining": String(Math.max(0, rl.remaining)),
+    "X-RateLimit-Reset": String(Math.floor(rl.resetAt.getTime() / 1000)),
+  };
+  if (rl.retryAfter !== undefined) {
+    headers["Retry-After"] = String(rl.retryAfter);
+  }
+  return headers;
 }

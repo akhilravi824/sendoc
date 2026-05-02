@@ -5,11 +5,13 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { DocBody, isHtmlDocument } from "@/components/DocBody";
 import { SharePopover } from "@/components/SharePopover";
+import { DownloadMenu } from "@/components/DownloadMenu";
 
 type SharedDoc = {
   title: string;
   content: string;
   updatedAt: number | null;
+  expiresAt: number | null;
 };
 
 function ReportButton({ token }: { token: string }) {
@@ -73,13 +75,15 @@ export default function SharedDocPage() {
   }, [token]);
 
   if (error) {
+    const message =
+      error === "Not found"
+        ? "This link isn't valid or has been revoked."
+        : error === "EXPIRED"
+          ? "This share link has expired. Anonymous docs are removed after 7 days unless claimed by a sendoc account."
+          : error;
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-3 px-6 text-center">
-        <p className="text-gray-500">
-          {error === "Not found"
-            ? "This link isn't valid or has been revoked."
-            : error}
-        </p>
+        <p className="text-gray-500">{message}</p>
         <Link href="/" className="text-sm text-brand hover:underline">
           Go to sendoc
         </Link>
@@ -109,9 +113,15 @@ export default function SharedDocPage() {
           sendoc
         </Link>
         <div className="flex items-center gap-3">
+          {doc.expiresAt && (
+            <span className="hidden rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800 sm:inline">
+              Expires {new Date(doc.expiresAt).toLocaleDateString()}
+            </span>
+          )}
           <span className="hidden text-xs text-gray-400 sm:inline">
             Shared document · read-only
           </span>
+          <DownloadMenu title={doc.title} content={doc.content} />
           <SharePopover title={doc.title} shareToken={token} />
         </div>
       </header>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb, verifyIdToken } from "@/lib/firebase-admin";
-import { checkIpRateLimit } from "@/lib/rate-limit";
+import { checkIpRateLimit, rateLimitHeaders } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
   if (!rl.ok) {
     return NextResponse.json(
       { error: "Too many reports. Try again later." },
-      { status: 429, headers: { "Retry-After": String(rl.retryAfter ?? 3600) } },
+      { status: 429, headers: rateLimitHeaders(rl) },
     );
   }
 

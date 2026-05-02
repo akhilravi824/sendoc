@@ -16,3 +16,37 @@ body {
     Arial,
     sans-serif;
 }
+
+/* Print stylesheet: hide nav/toolbars and let the doc breathe so users
+ * who Save-as-PDF from the browser get a clean output without sendoc
+ * chrome. The `.print:hidden` Tailwind utility hides specific buttons
+ * (Download menu itself, share popover, report); this rule below is a
+ * safety net for things that forgot to opt out. */
+@media print {
+  header,
+  footer,
+  nav,
+  [data-no-print] {
+    display: none !important;
+  }
+  body {
+    background: white !important;
+  }
+  main {
+    padding: 0 !important;
+    max-width: none !important;
+  }
+  /* Avoid awkward page breaks inside paragraphs / list items. */
+  p,
+  li,
+  pre,
+  blockquote {
+    break-inside: avoid;
+  }
+  /* Show link URLs in print so PDF readers can copy them. */
+  a[href]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.85em;
+    color: #555;
+  }
+}

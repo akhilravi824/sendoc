@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
+import { expiryFor, isExpired } from "@/lib/link-ttl";
 
 export const runtime = "nodejs";
 
@@ -26,10 +27,22 @@ export async function GET(
   if (data.shareLink?.active === false || data.status !== "active") {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+  if (isExpired(data)) {
+    return NextResponse.json(
+      {
+        error: "EXPIRED",
+        message:
+          "This share link has expired. Anonymous docs are removed after 7 days unless claimed.",
+        expiredAt: expiryFor(data),
+      },
+      { status: 410 },
+    );
+  }
 
   return NextResponse.json({
     title: data.title ?? "Untitled",
     content: data.content ?? "",
     updatedAt: data.updatedAt?.toMillis?.() ?? null,
+    expiresAt: expiryFor(data),
   });
 }

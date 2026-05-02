@@ -19,7 +19,8 @@ import { v4 as uuidv4 } from "uuid";
 import { adminDb } from "@/lib/firebase-admin";
 import { verifyApiKey } from "@/lib/auth/verify-api-key";
 import { moderate } from "@/lib/moderation";
-import { checkAndIncrementRateLimit } from "@/lib/rate-limit";
+import { checkAndIncrementRateLimit, rateLimitHeaders } from "@/lib/rate-limit";
+import { logAction } from "@/lib/audit/action";
 
 export const runtime = "nodejs";
 
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
         message: `Daily limit of ${rl.limit} reached. Resets at ${rl.resetAt.toUTCString()}.`,
         resetAt: rl.resetAt.toISOString(),
       },
-      { status: 429 },
+      { status: 429, headers: rateLimitHeaders(rl) },
     );
   }
 
@@ -132,6 +133,23 @@ export async function POST(req: NextRequest) {
       },
     });
 
+  logAction({
+    action: "doc.publish",
+    actor: {
+      type: "api_key",
+      uid: auth.uid,
+      email: auth.email ?? null,
+      keyId: auth.keyId,
+      ip:
+        req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
+        req.headers.get("x-real-ip") ||
+        null,
+      userAgent: req.headers.get("user-agent"),
+    },
+    docId,
+    meta: { mode: "external_publish", contentSize: content.length },
+  });
+
   const appUrl =
     process.env.NEXT_PUBLIC_APP_URL ||
     (req.headers.get("x-forwarded-proto") && req.headers.get("host")
@@ -144,6 +162,6 @@ export async function POST(req: NextRequest) {
       title,
       shareUrl: `${appUrl}/d/${linkToken}`,
     },
-    { status: 201 },
+    { status: 201, headers: rateLimitHeaders(rl) },
   );
 }

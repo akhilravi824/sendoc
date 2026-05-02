@@ -5,6 +5,8 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { DocBody, isHtmlDocument } from "@/components/DocBody";
 import { AskAIModal } from "@/components/AskAIModal";
+import { DownloadMenu } from "@/components/DownloadMenu";
+import { useAuth } from "@/components/AuthProvider";
 
 type EditDoc = {
   docId: string;
@@ -12,12 +14,16 @@ type EditDoc = {
   content: string;
   shareUrl: string;
   updatedAt: number | null;
+  ownerId: string | null;
+  ownerEmail: string | null;
+  expiresAt: number | null;
 };
 
 type EditView = "split" | "edit" | "preview";
 
 export default function EditPage() {
   const { editToken } = useParams<{ editToken: string }>();
+  const { user, idToken, isAnonymous } = useAuth();
   const [doc, setDoc] = useState<EditDoc | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -27,6 +33,8 @@ export default function EditPage() {
   const [deleted, setDeleted] = useState(false);
   const [view, setView] = useState<EditView>("split");
   const [askAIOpen, setAskAIOpen] = useState(false);
+  const [claiming, setClaiming] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -107,6 +115,31 @@ export default function EditPage() {
     setTimeout(() => setCopied(false), 1500);
   };
 
+  const onClaim = async () => {
+    if (!doc || !idToken) return;
+    setClaiming(true);
+    setClaimError(null);
+    try {
+      const res = await fetch(`/api/edit/${editToken}/claim`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.message || json.error || `HTTP ${res.status}`);
+      }
+      setDoc({
+        ...doc,
+        ownerId: user?.uid ?? null,
+        ownerEmail: user?.email ?? null,
+      });
+    } catch (e) {
+      setClaimError(e instanceof Error ? e.message : "Claim failed");
+    } finally {
+      setClaiming(false);
+    }
+  };
+
   const onDelete = async () => {
     if (!window.confirm("Delete this doc? This can't be undone.")) return;
     setDeleting(true);
@@ -136,13 +169,15 @@ export default function EditPage() {
   }
 
   if (error && !doc) {
+    const message =
+      error === "Not found"
+        ? "This edit link isn't valid or the doc has been removed."
+        : error === "EXPIRED"
+          ? "This edit link has expired. Anonymous docs are removed after 7 days unless claimed."
+          : error;
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-3 px-6 text-center">
-        <p className="text-gray-500">
-          {error === "Not found"
-            ? "This edit link isn't valid or the doc has been removed."
-            : error}
-        </p>
+        <p className="text-gray-500">{message}</p>
         <Link href="/" className="text-sm text-brand hover:underline">
           Go to sendoc
         </Link>
@@ -183,6 +218,7 @@ export default function EditPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <DownloadMenu title={doc.title} content={doc.content} />
           <button
             onClick={() => setAskAIOpen(true)}
             className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-brand-dark"
@@ -198,6 +234,52 @@ export default function EditPage() {
           </span>
         </div>
       </div>
+
+      {!doc.ownerId && !isAnonymous && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+          <div>
+            <p className="font-medium">Save this doc to your account</p>
+            <p className="mt-0.5">
+              {doc.expiresAt
+                ? `Anonymous docs expire ${new Date(doc.expiresAt).toLocaleDateString()}. Claim to keep it forever.`
+                : "Add it to your dashboard so you can find it later without the edit URL."}
+            </p>
+            {claimError && (
+              <p className="mt-1 text-red-700">{claimError}</p>
+            )}
+          </div>
+          <button
+            onClick={onClaim}
+            disabled={claiming}
+            className="shrink-0 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800 disabled:opacity-60"
+          >
+            {claiming ? "Claiming…" : "Claim doc"}
+          </button>
+        </div>
+      )}
+      {!doc.ownerId && isAnonymous && doc.expiresAt && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+          <p className="font-medium">
+            This doc expires {new Date(doc.expiresAt).toLocaleDateString()}
+          </p>
+          <p className="mt-0.5">
+            Sign in with Google to keep it permanently. Anonymous docs are
+            removed after 7 days.
+          </p>
+        </div>
+      )}
+      {doc.ownerId && user && doc.ownerId === user.uid && (
+        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+          <p className="font-medium">Saved to your account</p>
+          <p className="mt-0.5">
+            This doc is in your{" "}
+            <Link href="/dashboard" className="underline">
+              dashboard
+            </Link>
+            .
+          </p>
+        </div>
+      )}
 
       <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
         <p className="font-medium">Anyone with this URL can edit this doc.</p>

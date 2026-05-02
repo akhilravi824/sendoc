@@ -53,6 +53,19 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Per-action doc audit log (publish/edit/delete/copy/ai_edit).
+    // Privileged-only read; server-only write.
+    match /actionAudits/{auditId} {
+      allow read: if isPrivileged();
+      allow write: if false;
+    }
+
+    // Legacy AI edit audits — kept for the moderation paper trail.
+    match /aiEditAudits/{auditId} {
+      allow read: if isPrivileged();
+      allow write: if false;
+    }
+
     // Old takedowns collection (pre-refactor). Drop once migrated.
     match /takedowns/{id} {
       allow read: if isPrivileged();

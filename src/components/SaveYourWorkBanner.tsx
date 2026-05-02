@@ -14,6 +14,7 @@
 // known trade-off of cross-device anonymous sessions).
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   linkWithPopup,
   signInWithPopup,
@@ -62,22 +63,31 @@ export function SaveYourWorkBanner() {
   };
 
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
       <span className="text-base">⚠️</span>
-      <div className="flex-1">
+      <div className="flex-1 min-w-0">
         <p className="font-medium">Your docs are saved to this browser only.</p>
         <p className="text-xs text-amber-800">
-          Sign in with Google to keep them safe and access them from any device.
+          Sign in to keep them safe, manage from any device, and take down any
+          time.
         </p>
       </div>
-      <button
-        onClick={handleSave}
-        disabled={busy}
-        className="rounded-md bg-amber-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-950 disabled:opacity-50"
-      >
-        {busy ? "…" : "Save my work"}
-      </button>
-      {err && <p className="ml-2 text-xs text-red-700">{err}</p>}
+      <div className="flex shrink-0 items-center gap-2">
+        <button
+          onClick={handleSave}
+          disabled={busy}
+          className="rounded-md bg-amber-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-950 disabled:opacity-50"
+        >
+          {busy ? "…" : "Continue with Google"}
+        </button>
+        <Link
+          href="/login"
+          className="rounded-md border border-amber-700 px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+        >
+          Use email
+        </Link>
+      </div>
+      {err && <p className="w-full text-xs text-red-700">{err}</p>}
     </div>
   );
 }

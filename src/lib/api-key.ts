@@ -4,10 +4,12 @@
 // authenticate as a sendoc user without going through Firebase Auth.
 //
 // Format: `sk_sendoc_<32 random base32 chars>`
-// Storage: SHA-256 hash of the token, alongside metadata. The plaintext
-// is shown to the user ONCE on creation; we never store it.
+// Storage: HMAC-SHA-256(API_KEY_PEPPER, token) alongside metadata. The
+// plaintext is shown to the user ONCE on creation; we never store it.
+// See src/lib/secret-hash.ts for the peppering rationale and migration.
 
 import crypto from "node:crypto";
+import { pepperedHash } from "./secret-hash";
 
 const KEY_PREFIX = "sk_sendoc_";
 
@@ -22,12 +24,12 @@ export function generateApiKey(): { token: string; prefix: string; hash: string 
   return {
     token,
     prefix: token.slice(0, KEY_PREFIX.length + 6), // shown in UI (e.g. sk_sendoc_abc123)
-    hash: hashToken(token),
+    hash: pepperedHash(token),
   };
 }
 
 export function hashToken(token: string): string {
-  return crypto.createHash("sha256").update(token).digest("hex");
+  return pepperedHash(token);
 }
 
 export function isApiKey(token: string): boolean {

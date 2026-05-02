@@ -1,8 +1,13 @@
 // MCP (Model Context Protocol) server for sendoc.
 //
-// Exposes a single tool — `publish_to_sendoc` — that lets Claude (or any
-// MCP-compatible client) publish content to sendoc and get back a public
-// share URL. No auth required.
+// Exposes three tools that let Claude (or any MCP-compatible client)
+// work with sendoc docs:
+//   - publish_to_sendoc — create a new public doc
+//   - read_sendoc_doc   — fetch a doc by edit token
+//   - edit_sendoc_doc   — replace a doc's title/content using edit token
+//
+// All operations are token-gated; no separate auth required beyond the
+// edit token returned at publish time.
 //
 // Transport: Streamable HTTP (JSON-RPC 2.0 over POST).
 // Claude.ai users add this URL as a "Custom Connector" in Settings.
@@ -21,7 +26,7 @@ export const runtime = "nodejs";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "sendoc";
-const SERVER_VERSION = "1.0.0";
+const SERVER_VERSION = "1.1.0";
 
 type JsonRpcRequest = {
   jsonrpc: "2.0";
@@ -63,12 +68,75 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: "read_sendoc_doc",
+    description:
+      "Read the current title and content of a sendoc doc by edit token. " +
+      "Use this before edit_sendoc_doc when the user wants to iterate on a " +
+      "previously-published doc and you don't already have its content.",
+    inputSchema: {
+      type: "object",
+      required: ["editToken"],
+      properties: {
+        editToken: {
+          type: "string",
+          description:
+            "The edit token returned by publish_to_sendoc (or the trailing path of the editUrl).",
+        },
+      },
+    },
+  },
+  {
+    name: "edit_sendoc_doc",
+    description:
+      "Replace the title and/or content of an existing sendoc doc. Pass " +
+      "the editToken returned at publish time. Use this whenever the user " +
+      "wants to update, rewrite, append to, or otherwise modify a doc " +
+      "they've already published.",
+    inputSchema: {
+      type: "object",
+      required: ["editToken"],
+      properties: {
+        editToken: {
+          type: "string",
+          description: "Edit token for the doc to update.",
+        },
+        title: { type: "string", description: "New title (optional)." },
+        content: {
+          type: "string",
+          description:
+            "Full new document body (Markdown). Send the COMPLETE new doc; the server overwrites previous content.",
+        },
+      },
+    },
+  },
 ] as const;
+
+type McpResult = {
+  isError?: boolean;
+  content: Array<{ type: "text"; text: string }>;
+};
+
+function errorResult(message: string): McpResult {
+  return { isError: true, content: [{ type: "text", text: message }] };
+}
+
+function textResult(text: string): McpResult {
+  return { content: [{ type: "text", text }] };
+}
+
+// Some clients pass the full editUrl instead of just the token. Strip
+// the URL prefix if present so we accept both.
+function normalizeEditToken(input: string): string {
+  const trimmed = input.trim();
+  const m = trimmed.match(/\/edit\/([^/?#]+)/);
+  return m ? m[1] : trimmed;
+}
 
 async function callPublish(
   args: { title?: string; content: string },
   origin: string,
-): Promise<unknown> {
+): Promise<McpResult> {
   const res = await fetch(`${origin}/api/publish`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -80,27 +148,63 @@ async function callPublish(
   });
   const json = await res.json();
   if (!res.ok) {
-    return {
-      isError: true,
-      content: [
-        {
-          type: "text",
-          text: `Publish failed: ${json.message ?? json.error ?? "unknown error"}`,
-        },
-      ],
-    };
+    return errorResult(
+      `Publish failed: ${json.message ?? json.error ?? "unknown error"}`,
+    );
   }
-  return {
-    content: [
-      {
-        type: "text",
-        text:
-          `✓ Published to sendoc.\n\n` +
-          `📖 Public read URL (share this with viewers):\n${json.shareUrl}\n\n` +
-          `✏️ Edit URL (share only with collaborators you trust — anyone with this URL can edit):\n${json.editUrl}`,
-      },
-    ],
-  };
+  return textResult(
+    `✓ Published to sendoc.\n\n` +
+      `📖 Public read URL (share this with viewers):\n${json.shareUrl}\n\n` +
+      `✏️ Edit URL (share only with collaborators you trust — anyone with this URL can edit):\n${json.editUrl}\n\n` +
+      `editToken: ${json.editToken}`,
+  );
+}
+
+async function callRead(editToken: string, origin: string): Promise<McpResult> {
+  const res = await fetch(
+    `${origin}/api/edit/${encodeURIComponent(editToken)}`,
+  );
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return errorResult(
+      res.status === 410
+        ? "This doc has expired. Anonymous docs are removed after 7 days unless claimed."
+        : `Read failed: ${json.message ?? json.error ?? `HTTP ${res.status}`}`,
+    );
+  }
+  return textResult(
+    `# ${json.title || "Untitled"}\n\n${json.content || ""}\n\n` +
+      `(shareUrl: ${json.shareUrl})`,
+  );
+}
+
+async function callEdit(
+  args: { editToken: string; title?: string; content?: string },
+  origin: string,
+): Promise<McpResult> {
+  if (args.title === undefined && args.content === undefined) {
+    return errorResult("Pass at least one of `title` or `content` to update.");
+  }
+  const res = await fetch(
+    `${origin}/api/edit/${encodeURIComponent(args.editToken)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...(args.title !== undefined ? { title: args.title } : {}),
+        ...(args.content !== undefined ? { content: args.content } : {}),
+      }),
+    },
+  );
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return errorResult(
+      res.status === 410
+        ? "This doc has expired and can't be edited."
+        : `Edit failed: ${json.message ?? json.error ?? `HTTP ${res.status}`}`,
+    );
+  }
+  return textResult("✓ Doc updated.");
 }
 
 function getOrigin(req: NextRequest): string {
@@ -141,28 +245,68 @@ async function handleRpc(
     case "tools/call": {
       const params = (rpc.params ?? {}) as {
         name?: string;
-        arguments?: { title?: string; content?: string };
+        arguments?: {
+          title?: string;
+          content?: string;
+          editToken?: string;
+        };
       };
-      if (params.name !== "publish_to_sendoc") {
-        return {
-          jsonrpc: "2.0",
-          id,
-          error: { code: -32601, message: `Unknown tool: ${params.name}` },
-        };
-      }
       const args = params.arguments ?? {};
-      if (!args.content || typeof args.content !== "string") {
-        return {
-          jsonrpc: "2.0",
-          id,
-          error: { code: -32602, message: "`content` argument is required" },
-        };
+
+      if (params.name === "publish_to_sendoc") {
+        if (!args.content || typeof args.content !== "string") {
+          return {
+            jsonrpc: "2.0",
+            id,
+            error: { code: -32602, message: "`content` argument is required" },
+          };
+        }
+        const result = await callPublish(
+          { title: args.title, content: args.content },
+          origin,
+        );
+        return { jsonrpc: "2.0", id, result };
       }
-      const result = await callPublish(
-        { title: args.title, content: args.content },
-        origin,
-      );
-      return { jsonrpc: "2.0", id, result };
+
+      if (params.name === "read_sendoc_doc") {
+        if (!args.editToken || typeof args.editToken !== "string") {
+          return {
+            jsonrpc: "2.0",
+            id,
+            error: { code: -32602, message: "`editToken` argument is required" },
+          };
+        }
+        const result = await callRead(
+          normalizeEditToken(args.editToken),
+          origin,
+        );
+        return { jsonrpc: "2.0", id, result };
+      }
+
+      if (params.name === "edit_sendoc_doc") {
+        if (!args.editToken || typeof args.editToken !== "string") {
+          return {
+            jsonrpc: "2.0",
+            id,
+            error: { code: -32602, message: "`editToken` argument is required" },
+          };
+        }
+        const result = await callEdit(
+          {
+            editToken: normalizeEditToken(args.editToken),
+            title: args.title,
+            content: args.content,
+          },
+          origin,
+        );
+        return { jsonrpc: "2.0", id, result };
+      }
+
+      return {
+        jsonrpc: "2.0",
+        id,
+        error: { code: -32601, message: `Unknown tool: ${params.name}` },
+      };
     }
 
     case "ping":

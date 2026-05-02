@@ -2,7 +2,8 @@
 // Throws "INVALID_API_KEY" on bad/missing/revoked keys.
 
 import { adminDb } from "@/lib/firebase-admin";
-import { extractBearerToken, hashToken, isApiKey } from "../api-key";
+import { extractBearerToken, isApiKey } from "../api-key";
+import { lookupHashes, pepperedHash } from "../secret-hash";
 
 export type ApiKeyAuth = {
   uid: string;
@@ -18,10 +19,12 @@ export async function verifyApiKey(
     throw new Error("INVALID_API_KEY");
   }
 
-  const hash = hashToken(token);
+  // Try the new peppered hash and the legacy SHA-256 hash in one query so
+  // existing keys keep working through the rotation window.
+  const [newHash, oldHash] = lookupHashes(token);
   const snap = await adminDb()
     .collection("apiKeys")
-    .where("hash", "==", hash)
+    .where("hash", "in", [newHash, oldHash])
     .limit(1)
     .get();
 
@@ -35,9 +38,12 @@ export async function verifyApiKey(
   }
 
   // Update lastUsedAt — fire-and-forget so we don't slow down the request.
-  doc.ref
-    .update({ lastUsedAt: new Date() })
-    .catch(() => undefined);
+  // Opportunistically rotate legacy hashes to the peppered version on use.
+  const update: Record<string, unknown> = { lastUsedAt: new Date() };
+  if (data.hash !== newHash) {
+    update.hash = pepperedHash(token);
+  }
+  doc.ref.update(update).catch(() => undefined);
 
   return {
     uid: data.ownerId,

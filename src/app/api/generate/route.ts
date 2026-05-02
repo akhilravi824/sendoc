@@ -10,7 +10,7 @@
 import { NextRequest } from "next/server";
 import { adminDb, verifyIdToken } from "@/lib/firebase-admin";
 import { anthropic, DEFAULT_MODEL, SENDOC_SYSTEM_PROMPT } from "@/lib/anthropic";
-import { checkAndIncrementRateLimit } from "@/lib/rate-limit";
+import { checkAndIncrementRateLimit, rateLimitHeaders } from "@/lib/rate-limit";
 import { moderate } from "@/lib/moderation";
 
 export const runtime = "nodejs";
@@ -80,7 +80,13 @@ export async function POST(req: NextRequest) {
           : `Daily limit of ${rl.limit} reached. Resets at ${rl.resetAt.toUTCString()}.`,
         resetAt: rl.resetAt.toISOString(),
       }),
-      { status: 429, headers: { "Content-Type": "application/json" } },
+      {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          ...rateLimitHeaders(rl),
+        },
+      },
     );
   }
 

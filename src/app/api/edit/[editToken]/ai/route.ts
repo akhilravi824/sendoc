@@ -16,11 +16,13 @@
 //   apply — but flagging here gives admins a paper trail)
 
 import { NextRequest } from "next/server";
-import crypto from "node:crypto";
 import { adminDb } from "@/lib/firebase-admin";
 import { anthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { moderate } from "@/lib/moderation";
-import { checkIpRateLimit } from "@/lib/rate-limit";
+import { checkIpRateLimit, rateLimitHeaders } from "@/lib/rate-limit";
+import { lookupHashes, pepperedHash } from "@/lib/secret-hash";
+import { logAction } from "@/lib/audit/action";
+import { isExpired } from "@/lib/link-ttl";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -29,10 +31,6 @@ function getClientIp(req: NextRequest): string {
   const xff = req.headers.get("x-forwarded-for");
   if (xff) return xff.split(",")[0].trim();
   return req.headers.get("x-real-ip") || "unknown";
-}
-
-function hashEditToken(token: string): string {
-  return crypto.createHash("sha256").update(token).digest("hex");
 }
 
 const SYSTEM_PROMPT = `You are sendoc, an AI editor working on a shared document.
@@ -62,15 +60,22 @@ export async function POST(
         error: "RATE_LIMIT",
         message: "Too many AI edits from this IP. Try again later.",
       }),
-      { status: 429, headers: { "Content-Type": "application/json" } },
+      {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          ...rateLimitHeaders(ipLimit),
+        },
+      },
     );
   }
 
-  // Look up doc by editToken hash.
-  const hash = hashEditToken(params.editToken);
+  // Look up doc by editToken hash. Try peppered + legacy in one query so
+  // existing tokens keep working through the migration.
+  const [newHash, oldHash] = lookupHashes(params.editToken);
   const snap = await adminDb()
     .collection("docs")
-    .where("editTokenHash", "==", hash)
+    .where("editTokenHash", "in", [newHash, oldHash])
     .limit(1)
     .get();
   if (snap.empty) {
@@ -87,6 +92,17 @@ export async function POST(
       headers: { "Content-Type": "application/json" },
     });
   }
+  if (isExpired(doc)) {
+    return new Response(JSON.stringify({ error: "EXPIRED" }), {
+      status: 410,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  if (doc.editTokenHash !== newHash) {
+    docRef
+      .update({ editTokenHash: pepperedHash(params.editToken) })
+      .catch(() => undefined);
+  }
 
   // Per-doc throttle.
   const docLimit = await checkIpRateLimit(
@@ -101,7 +117,13 @@ export async function POST(
         error: "DOC_RATE_LIMIT",
         message: "This doc has hit its daily AI-edit limit. Try again tomorrow.",
       }),
-      { status: 429, headers: { "Content-Type": "application/json" } },
+      {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          ...rateLimitHeaders(docLimit),
+        },
+      },
     );
   }
 
@@ -151,12 +173,30 @@ export async function POST(
   }
 
   // Build the user message: current doc + instruction.
-  const userMessage = `Current document:
+  // We split into two content blocks so we can cache the doc content
+  // (the heavy, repeated part) but always pass the instruction fresh.
+  // The `cache_control` field is supported by the Anthropic API but not
+  // typed in our SDK version (0.32.1). Casting until we upgrade.
+  const docBlock = `Current document:
 \`\`\`
 ${doc.content ?? ""}
-\`\`\`
+\`\`\``;
+  const userBlocks = [
+    {
+      type: "text" as const,
+      text: docBlock,
+      cache_control: { type: "ephemeral" as const },
+    },
+    { type: "text" as const, text: `Instruction: ${instruction}` },
+  ] as unknown as Parameters<typeof anthropic.messages.stream>[0]["messages"][number]["content"];
 
-Instruction: ${instruction}`;
+  const systemBlocks = [
+    {
+      type: "text" as const,
+      text: SYSTEM_PROMPT,
+      cache_control: { type: "ephemeral" as const },
+    },
+  ] as unknown as Parameters<typeof anthropic.messages.stream>[0]["system"];
 
   const encoder = new TextEncoder();
   let accumulated = "";
@@ -167,8 +207,8 @@ Instruction: ${instruction}`;
         const anthropicStream = await anthropic.messages.stream({
           model: body.model || DEFAULT_MODEL,
           max_tokens: 8192,
-          system: SYSTEM_PROMPT,
-          messages: [{ role: "user", content: userMessage }],
+          system: systemBlocks,
+          messages: [{ role: "user", content: userBlocks }],
         });
 
         for await (const event of anthropicStream) {
@@ -204,8 +244,8 @@ Instruction: ${instruction}`;
           );
         }
 
-        // Audit entry — every AI edit gets logged with the doc snapshot
-        // (truncated) so admins can review patterns of misuse.
+        // Legacy audit collection — keeps aiEditAudits as the
+        // AI-specific paper trail for moderation review.
         await adminDb().collection("aiEditAudits").add({
           docId: doc.docId,
           ownerId: doc.ownerId ?? null,
@@ -214,6 +254,28 @@ Instruction: ${instruction}`;
           outputSize: accumulated.length,
           flagged: outputCheck.flagged,
           createdAt: new Date(),
+        });
+
+        // Unified action-audit entry. Mirrors doc.publish/edit/etc so
+        // a single query reconstructs a doc's full history.
+        const ownerUid = doc.ownerId ?? null;
+        logAction({
+          action: "doc.ai_edit",
+          actor: ownerUid
+            ? {
+                type: "user",
+                uid: ownerUid,
+                email: doc.ownerEmail ?? null,
+                ip,
+              }
+            : { type: "anonymous", ip },
+          docId: doc.docId,
+          meta: {
+            instructionSample: instruction.slice(0, 200),
+            outputSize: accumulated.length,
+            flagged: outputCheck.flagged,
+            model: body.model || DEFAULT_MODEL,
+          },
         });
 
         // Stamp the doc with last-AI-edit timestamp (not the new content
