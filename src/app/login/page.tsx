@@ -153,30 +153,37 @@ function LoginInner() {
   }, []);
 
   const handleGoogle = async () => {
+    console.log("[sendoc/auth] handleGoogle start; nextUrl =", nextUrl);
     setBusy("google");
     setErr(null);
     setInfo(null);
     try {
-      // Always use redirect, never popup. Popups silently fail on
-      // browsers that block third-party cookies (Safari default,
-      // Chrome incognito, Brave, hardened profiles) — the popup opens,
-      // the user picks their account, the popup closes, and the
-      // credential never propagates to Firebase. signInWithRedirect
-      // routes through the firebaseapp.com domain as a top-level
-      // navigation, which doesn't depend on third-party cookies.
-      // Trade: ~0.5s slower UX (full page bounce) for reliability.
-      // We sign out the anonymous session first because anon-link via
-      // redirect can't recover gracefully from auth/credential-already-
-      // in-use; the claim flow on /edit/[token] handles anon-doc
-      // recovery if the user holds the editToken.
+      console.log(
+        "[sendoc/auth] currentUser before signin:",
+        auth.currentUser
+          ? `${auth.currentUser.uid} (${auth.currentUser.isAnonymous ? "anon" : auth.currentUser.email})`
+          : "none",
+      );
       if (auth.currentUser?.isAnonymous) {
-        await signOut(auth).catch(() => undefined);
+        console.log("[sendoc/auth] signing out anon before Google redirect");
+        await signOut(auth).catch((err) =>
+          console.warn("[sendoc/auth] signOut failed:", err),
+        );
       }
+      console.log("[sendoc/auth] calling signInWithRedirect → Google");
       await signInWithRedirect(auth, new GoogleAuthProvider());
-      // signInWithRedirect navigates away — no further code runs in
-      // this tab until the user returns and getRedirectResult fires
-      // in the mount effect above.
+      // navigates away — anything below this line runs only if redirect failed
+      console.log(
+        "[sendoc/auth] WARNING: signInWithRedirect returned without navigating",
+      );
     } catch (e) {
+      const fe = e as FirebaseError;
+      console.error(
+        "[sendoc/auth] handleGoogle threw:",
+        fe.code,
+        fe.message,
+        e,
+      );
       const msg = friendlyError(e);
       if (msg) setErr(msg);
     } finally {

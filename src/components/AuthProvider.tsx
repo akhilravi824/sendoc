@@ -59,16 +59,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // pre-existing anonymous user, leaving the UI confused about who
     // is actually signed in.
     (async () => {
+      console.log("[sendoc/auth] AuthProvider mount; checking redirect result");
       try {
         const result = await getRedirectResult(auth);
         if (result?.user) {
           console.log(
-            "[sendoc/auth] redirect sign-in resolved",
+            "[sendoc/auth] redirect sign-in resolved →",
             result.user.email ?? result.user.uid,
           );
+        } else {
+          console.log("[sendoc/auth] no pending redirect result");
         }
       } catch (e) {
-        console.error("[sendoc/auth] getRedirectResult error:", e);
+        const fe = e as { code?: string; message?: string };
+        console.error(
+          "[sendoc/auth] getRedirectResult error:",
+          fe.code ?? "(no code)",
+          fe.message ?? e,
+        );
       }
     })();
 
