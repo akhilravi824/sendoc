@@ -21,13 +21,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   createUserWithEmailAndPassword,
   EmailAuthProvider,
-  getRedirectResult,
   GoogleAuthProvider,
   linkWithCredential,
   sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
-  signInWithRedirect,
+  signInWithPopup,
   signOut,
 } from "firebase/auth";
 import { type FirebaseError } from "firebase/app";
@@ -113,45 +112,6 @@ function LoginInner() {
     }
   }, [loading, user, isAnonymous, router, nextUrl]);
 
-  // Handle the return half of the redirect-based sign-in path. When a
-  // user signs in via signInWithRedirect / linkWithRedirect, the page
-  // navigates to Google and back — getRedirectResult resolves on first
-  // load with the resulting credential (or null if there's nothing to
-  // process). Errors here are surfaced inline.
-  //
-  // Special case: if linkWithRedirect was attempted and Google is
-  // already a separate Firebase user, getRedirectResult throws
-  // auth/credential-already-in-use. We auto-recover by signing out the
-  // anon and immediately redirecting to plain sign-in — the user
-  // doesn't have to click again. The anon-session's docs orphan; the
-  // claim flow on /edit/[token] is the recovery path.
-  useEffect(() => {
-    (async () => {
-      try {
-        const result = await getRedirectResult(auth);
-        if (result?.user) {
-          router.replace(nextUrl);
-        }
-      } catch (e) {
-        const fe = e as FirebaseError;
-        if (fe.code === "auth/credential-already-in-use") {
-          try {
-            await signOut(auth);
-            await signInWithRedirect(auth, new GoogleAuthProvider());
-          } catch (e2) {
-            const msg = friendlyError(e2);
-            if (msg) setErr(msg);
-          }
-          return;
-        }
-        const msg = friendlyError(e);
-        if (msg) setErr(msg);
-      }
-    })();
-    // run once on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const handleGoogle = async () => {
     console.log("[sendoc/auth] handleGoogle start; nextUrl =", nextUrl);
     setBusy("google");
@@ -164,18 +124,22 @@ function LoginInner() {
           ? `${auth.currentUser.uid} (${auth.currentUser.isAnonymous ? "anon" : auth.currentUser.email})`
           : "none",
       );
+      // Sign out the anon user first. Linking the anon UID to Google
+      // would preserve session docs, but linkWithPopup throws
+      // credential-already-in-use whenever Google is already a separate
+      // Firebase user — and there's no way to know up front. We trade
+      // that nice-to-have for a sign-in flow that always works. Orphaned
+      // anon docs can still be claimed via /edit/[token].
       if (auth.currentUser?.isAnonymous) {
-        console.log("[sendoc/auth] signing out anon before Google redirect");
+        console.log("[sendoc/auth] signing out anon before Google popup");
         await signOut(auth).catch((err) =>
           console.warn("[sendoc/auth] signOut failed:", err),
         );
       }
-      console.log("[sendoc/auth] calling signInWithRedirect → Google");
-      await signInWithRedirect(auth, new GoogleAuthProvider());
-      // navigates away — anything below this line runs only if redirect failed
-      console.log(
-        "[sendoc/auth] WARNING: signInWithRedirect returned without navigating",
-      );
+      console.log("[sendoc/auth] calling signInWithPopup → Google");
+      await signInWithPopup(auth, new GoogleAuthProvider());
+      console.log("[sendoc/auth] popup sign-in succeeded; redirecting to", nextUrl);
+      router.replace(nextUrl);
     } catch (e) {
       const fe = e as FirebaseError;
       console.error(
