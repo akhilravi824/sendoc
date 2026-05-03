@@ -186,6 +186,7 @@ function LoginInner() {
 
   const handleEmail = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("[sendoc/auth] handleEmail start", { mode });
     if (!email || !password) {
       setErr("Email and password required.");
       return;
@@ -195,19 +196,32 @@ function LoginInner() {
     setInfo(null);
     try {
       if (mode === "signup") {
+        console.log(
+          "[sendoc/auth] signup; currentUser is",
+          auth.currentUser?.isAnonymous ? "anonymous" : "non-anonymous",
+        );
         // Try to link to the anon UID first to preserve session docs.
         if (auth.currentUser?.isAnonymous) {
           try {
+            console.log("[sendoc/auth] attempting linkWithCredential");
             const cred = EmailAuthProvider.credential(email, password);
             const linked = await linkWithCredential(auth.currentUser, cred);
-            // Best-effort: send verification email; ignore failures.
+            console.log(
+              "[sendoc/auth] linkWithCredential succeeded for",
+              linked.user.email,
+            );
             sendEmailVerification(linked.user).catch(() => undefined);
+            console.log("[sendoc/auth] redirecting to", nextUrl);
             router.replace(nextUrl);
             return;
           } catch (e2) {
             const fe = e2 as FirebaseError;
+            console.error(
+              "[sendoc/auth] linkWithCredential failed:",
+              fe.code,
+              fe.message,
+            );
             if (fe.code !== "auth/email-already-in-use") throw e2;
-            // Email is already taken — sign out anon and tell the user.
             await signOut(auth);
             setErr(
               "An account with this email already exists. Switch to Sign in.",
@@ -216,25 +230,40 @@ function LoginInner() {
             return;
           }
         }
+        console.log("[sendoc/auth] attempting createUserWithEmailAndPassword");
         const created = await createUserWithEmailAndPassword(
           auth,
           email,
           password,
         );
+        console.log(
+          "[sendoc/auth] createUser succeeded for",
+          created.user.email,
+        );
         sendEmailVerification(created.user).catch(() => undefined);
+        console.log("[sendoc/auth] redirecting to", nextUrl);
         router.replace(nextUrl);
       } else {
-        // Sign in. Sign out the anon session first since we can't link
-        // an already-existing user; this session's anon docs orphan.
+        console.log("[sendoc/auth] signin; signing out anon if any");
         if (auth.currentUser?.isAnonymous) await signOut(auth);
-        await signInWithEmailAndPassword(auth, email, password);
+        console.log("[sendoc/auth] attempting signInWithEmailAndPassword");
+        const cred = await signInWithEmailAndPassword(auth, email, password);
+        console.log("[sendoc/auth] signin succeeded for", cred.user.email);
+        console.log("[sendoc/auth] redirecting to", nextUrl);
         router.replace(nextUrl);
       }
     } catch (e) {
+      const fe = e as FirebaseError;
+      console.error(
+        "[sendoc/auth] handleEmail outer catch:",
+        fe.code,
+        fe.message,
+      );
       const msg = friendlyError(e);
       if (msg) setErr(msg);
     } finally {
       setBusy(null);
+      console.log("[sendoc/auth] handleEmail finished");
     }
   };
 
