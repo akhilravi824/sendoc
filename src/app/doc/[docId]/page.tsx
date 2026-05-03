@@ -2,21 +2,43 @@
 // Open to anonymous users (the doc's owner is whoever's UID is in ownerId,
 // which works for both anon and Google-backed UIDs).
 //
-// Sprint 3 will add: ShareSheet, public /d/[token] resolver for non-owners,
-// link-gated and identity-gated permissions.
+// Owner-created docs (those generated from the dashboard prompt) don't
+// have an editToken — only owner identity gates editing. So the
+// collaborator panel needs to live here, not just on /edit/<editToken>.
 
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { doc, onSnapshot } from "firebase/firestore";
+import { getDb } from "@/lib/firebase";
 import { DocEditor } from "@/components/DocEditor";
 import { ShareButton } from "@/components/ShareButton";
 import { SignOutButton } from "@/components/SignOutButton";
+import { CollaboratorsPanel } from "@/components/CollaboratorsPanel";
 import { useAuth } from "@/components/AuthProvider";
 
 export default function DocPage() {
   const { docId } = useParams<{ docId: string }>();
   const { user, isAnonymous, loading } = useAuth();
+
+  // We need the doc's ownerId to decide whether to render the
+  // collaborator panel. Subscribing here is cheap because Firestore
+  // dedups with the parallel subscription DocEditor opens for the
+  // same doc.
+  const [ownerId, setOwnerId] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!user || !docId) return;
+    const unsub = onSnapshot(doc(getDb(), "docs", docId), (snap) => {
+      if (!snap.exists()) {
+        setOwnerId(null);
+        return;
+      }
+      setOwnerId((snap.data().ownerId as string | null) ?? null);
+    });
+    return () => unsub();
+  }, [docId, user]);
 
   if (loading || !user) {
     return (
@@ -25,6 +47,8 @@ export default function DocPage() {
       </main>
     );
   }
+
+  const isOwner = !!ownerId && ownerId === user.uid;
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-8">
@@ -48,6 +72,15 @@ export default function DocPage() {
       </header>
 
       <DocEditor docId={docId} />
+
+      {/* Collaborator invites — owner-only. Same panel as on
+          /edit/[editToken]; lives here too because owner-created docs
+          don't have an editToken to navigate by. */}
+      {isOwner && (
+        <section className="mt-10">
+          <CollaboratorsPanel docId={docId} isOwner />
+        </section>
+      )}
     </main>
   );
 }
