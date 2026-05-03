@@ -25,7 +25,6 @@ import {
   GoogleAuthProvider,
   linkWithCredential,
   linkWithPopup,
-  linkWithRedirect,
   sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
@@ -100,6 +99,13 @@ export default function LoginPage() {
   // navigates to Google and back — getRedirectResult resolves on first
   // load with the resulting credential (or null if there's nothing to
   // process). Errors here are surfaced inline.
+  //
+  // Special case: if linkWithRedirect was attempted and Google is
+  // already a separate Firebase user, getRedirectResult throws
+  // auth/credential-already-in-use. We auto-recover by signing out the
+  // anon and immediately redirecting to plain sign-in — the user
+  // doesn't have to click again. The anon-session's docs orphan; the
+  // claim flow on /edit/[token] is the recovery path.
   useEffect(() => {
     (async () => {
       try {
@@ -108,6 +114,17 @@ export default function LoginPage() {
           router.replace("/dashboard");
         }
       } catch (e) {
+        const fe = e as FirebaseError;
+        if (fe.code === "auth/credential-already-in-use") {
+          try {
+            await signOut(auth);
+            await signInWithRedirect(auth, new GoogleAuthProvider());
+          } catch (e2) {
+            const msg = friendlyError(e2);
+            if (msg) setErr(msg);
+          }
+          return;
+        }
         const msg = friendlyError(e);
         if (msg) setErr(msg);
       }
@@ -135,13 +152,15 @@ export default function LoginPage() {
             // through to plain sign-in (this session's anon docs orphan).
             await signOut(auth);
           } else if (isPopupBlocked(e)) {
-            // Browser blocked the popup; redirect-link instead. The
-            // redirect leaves this page; getRedirectResult on the way
-            // back finishes the sign-in.
-            await linkWithRedirect(
-              auth.currentUser!,
-              new GoogleAuthProvider(),
-            );
+            // Browser blocked the popup. We deliberately do NOT use
+            // linkWithRedirect here because if linking fails (Google is
+            // already a separate user), the redirect-back path can't
+            // recover cleanly — getRedirectResult throws and we have
+            // to start over. signInWithRedirect always succeeds when
+            // the Google account exists, at the cost of orphaning this
+            // session's anon docs (claim flow recovers them).
+            await signOut(auth).catch(() => undefined);
+            await signInWithRedirect(auth, new GoogleAuthProvider());
             return;
           } else {
             throw e;
