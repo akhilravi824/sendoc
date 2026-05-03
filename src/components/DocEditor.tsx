@@ -4,16 +4,19 @@
 // - Subscribes to Firestore for live content of docs/{docId}
 // - On mount, if URL says ?generate=1, calls /api/generate to stream Claude's
 //   output and writes incremental updates back to Firestore
-// - Also a basic textarea so the user can edit after generation
+// - Edit / Split / Preview toggle so the rendered Markdown is the default
+//   experience (the textarea is the source, not the published view)
 //
-// Sprint 4 will replace this with Tiptap + Yjs + Hocuspocus for real-time
-// multi-user editing. For now: single-user read/write.
+// Sprint 4 will replace the textarea with Tiptap + Yjs + Hocuspocus for
+// real-time multi-user editing. For now: single-user read/write with
+// live preview via DocBody (same renderer as /d/[token] and /edit/).
 
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { doc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "./AuthProvider";
+import { DocBody, isHtmlDocument } from "./DocBody";
 
 type Doc = {
   docId: string;
@@ -22,6 +25,8 @@ type Doc = {
   ownerId: string;
   status: string;
 };
+
+type View = "edit" | "split" | "preview";
 
 export function DocEditor({ docId }: { docId: string }) {
   const { user, idToken } = useAuth();
@@ -34,6 +39,9 @@ export function DocEditor({ docId }: { docId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [draftContent, setDraftContent] = useState("");
   const [savedAt, setSavedAt] = useState<Date | null>(null);
+  // Default to split view so the user sees the rendered preview immediately
+  // alongside the source. They can toggle to preview-only or edit-only.
+  const [view, setView] = useState<View>("split");
   const generationStartedRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -133,7 +141,7 @@ export function DocEditor({ docId }: { docId: string }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <header className="flex items-center justify-between">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <input
           value={doc_.title}
           onChange={async (e) => {
@@ -144,30 +152,67 @@ export function DocEditor({ docId }: { docId: string }) {
               updatedAt: serverTimestamp(),
             });
           }}
-          className="w-full bg-transparent text-2xl font-semibold focus:outline-none"
+          className="min-w-0 flex-1 bg-transparent text-2xl font-semibold focus:outline-none"
           placeholder="Untitled"
         />
-        <span className="ml-4 shrink-0 text-xs text-gray-400">
-          {streaming
-            ? "Generating…"
-            : savedAt
-              ? `Saved ${savedAt.toLocaleTimeString()}`
-              : ""}
-        </span>
+        <div className="flex shrink-0 items-center gap-3">
+          <div className="inline-flex items-center rounded-lg border border-gray-200 bg-white p-0.5 text-xs">
+            {(["edit", "split", "preview"] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className={`rounded px-2.5 py-1 capitalize transition ${
+                  view === v
+                    ? "bg-gray-900 text-white"
+                    : "text-gray-600 hover:bg-gray-100"
+                }`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+          <span className="hidden text-xs text-gray-400 sm:inline">
+            {streaming
+              ? "Generating…"
+              : savedAt
+                ? `Saved ${savedAt.toLocaleTimeString()}`
+                : ""}
+          </span>
+        </div>
       </header>
 
-      <textarea
-        value={draftContent}
-        onChange={(e) => onLocalEdit(e.target.value)}
-        readOnly={streaming}
-        className="min-h-[60vh] w-full resize-none rounded-lg border border-gray-200 bg-white p-6 font-mono text-sm leading-relaxed text-gray-800 shadow-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
-        placeholder="Your document will appear here…"
-      />
-
-      <p className="text-xs text-gray-400">
-        Markdown is stored as raw text for now. Sprint 4 wires this up to a
-        rich-text editor (Tiptap) with real-time collaboration.
-      </p>
+      <div
+        className={`grid gap-4 ${
+          view === "split" ? "lg:grid-cols-2" : "grid-cols-1"
+        }`}
+      >
+        {(view === "edit" || view === "split") && (
+          <textarea
+            value={draftContent}
+            onChange={(e) => onLocalEdit(e.target.value)}
+            readOnly={streaming}
+            className="min-h-[60vh] w-full resize-none rounded-lg border border-gray-200 bg-white p-6 font-mono text-sm leading-relaxed text-gray-800 shadow-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
+            placeholder="Your document will appear here…"
+          />
+        )}
+        {(view === "preview" || view === "split") && (
+          <div
+            className={`min-h-[60vh] overflow-auto rounded-lg border border-gray-200 ${
+              isHtmlDocument(draftContent) ? "bg-white p-0" : "bg-gray-50 p-6"
+            }`}
+          >
+            {draftContent ? (
+              <DocBody title={doc_.title || "Untitled"} content={draftContent} />
+            ) : (
+              <p className="p-6 text-gray-400">
+                {streaming
+                  ? "Streaming…"
+                  : "Preview will appear here as content is generated or you write."}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
