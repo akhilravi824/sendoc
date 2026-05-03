@@ -16,8 +16,8 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   createUserWithEmailAndPassword,
   EmailAuthProvider,
@@ -65,9 +65,28 @@ function friendlyError(e: unknown): string {
 }
 
 
+// Wrapper provides the Suspense boundary that Next.js requires whenever
+// useSearchParams() is called in an App Router client page. Without it,
+// the production build aborts with "useSearchParams() should be wrapped
+// in a suspense boundary at page /login".
 export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center text-gray-500">
+          Loading…
+        </main>
+      }
+    >
+      <LoginInner />
+    </Suspense>
+  );
+}
+
+function LoginInner() {
   const { user, isAnonymous, loading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -75,11 +94,24 @@ export default function LoginPage() {
   const [err, setErr] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
+  // Where to send the user after sign-in. Defaults to /dashboard but
+  // honors a ?next=/d/<token> param so a viewer who clicked Sign in
+  // from a public share page bounces back to that doc instead of
+  // landing on a stranger's dashboard. Only same-origin paths are
+  // allowed — never echo back an arbitrary URL or we have an open
+  // redirect.
+  const nextUrl = useMemo(() => {
+    const raw = searchParams?.get("next");
+    if (!raw) return "/dashboard";
+    if (!raw.startsWith("/") || raw.startsWith("//")) return "/dashboard";
+    return raw;
+  }, [searchParams]);
+
   useEffect(() => {
     if (!loading && user && !isAnonymous) {
-      router.replace("/dashboard");
+      router.replace(nextUrl);
     }
-  }, [loading, user, isAnonymous, router]);
+  }, [loading, user, isAnonymous, router, nextUrl]);
 
   // Handle the return half of the redirect-based sign-in path. When a
   // user signs in via signInWithRedirect / linkWithRedirect, the page
@@ -98,7 +130,7 @@ export default function LoginPage() {
       try {
         const result = await getRedirectResult(auth);
         if (result?.user) {
-          router.replace("/dashboard");
+          router.replace(nextUrl);
         }
       } catch (e) {
         const fe = e as FirebaseError;
@@ -170,7 +202,7 @@ export default function LoginPage() {
             const linked = await linkWithCredential(auth.currentUser, cred);
             // Best-effort: send verification email; ignore failures.
             sendEmailVerification(linked.user).catch(() => undefined);
-            router.replace("/dashboard");
+            router.replace(nextUrl);
             return;
           } catch (e2) {
             const fe = e2 as FirebaseError;
@@ -190,13 +222,13 @@ export default function LoginPage() {
           password,
         );
         sendEmailVerification(created.user).catch(() => undefined);
-        router.replace("/dashboard");
+        router.replace(nextUrl);
       } else {
         // Sign in. Sign out the anon session first since we can't link
         // an already-existing user; this session's anon docs orphan.
         if (auth.currentUser?.isAnonymous) await signOut(auth);
         await signInWithEmailAndPassword(auth, email, password);
-        router.replace("/dashboard");
+        router.replace(nextUrl);
       }
     } catch (e) {
       const msg = friendlyError(e);

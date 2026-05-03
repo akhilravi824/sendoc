@@ -6,6 +6,7 @@ import Link from "next/link";
 import { DocBody, isHtmlDocument } from "@/components/DocBody";
 import { SharePopover } from "@/components/SharePopover";
 import { DownloadMenu } from "@/components/DownloadMenu";
+import { SendByEmailButton } from "@/components/SendByEmailButton";
 import { useAuth } from "@/components/AuthProvider";
 
 type SharedDoc = {
@@ -196,9 +197,10 @@ export default function SharedDocPage() {
             Shared document · read-only
           </span>
           <DownloadMenu title={doc.title} content={doc.content} />
+          <SendByEmailButton token={token} docTitle={doc.title} />
           <SharePopover title={doc.title} shareToken={token} />
           <SaveToDashboardButton token={token} />
-          <SignInOrAccountChip />
+          <SignInOrAccountChip token={token} />
         </div>
       </header>
 
@@ -225,13 +227,17 @@ export default function SharedDocPage() {
  * Auth chip for the share page header. Shows "Sign in" when anonymous,
  * a small dashboard link when signed in.
  */
-function SignInOrAccountChip() {
+function SignInOrAccountChip({ token }: { token: string }) {
   const { isAnonymous, loading } = useAuth();
   if (loading) return null;
   if (isAnonymous) {
+    // Send the user back to THIS share page after sign-in instead of
+    // dropping them on /dashboard, so they don't lose the doc they
+    // were trying to view.
+    const next = `/d/${token}`;
     return (
       <Link
-        href="/login"
+        href={`/login?next=${encodeURIComponent(next)}`}
         className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700"
       >
         Sign in

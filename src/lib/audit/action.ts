@@ -37,7 +37,8 @@ export type ActionAuditAction =
   | "doc.restore"
   | "doc.copy"
   | "doc.ai_edit"
-  | "doc.claim";
+  | "doc.claim"
+  | "doc.share";
 
 export function logAction(params: {
   action: ActionAuditAction;
