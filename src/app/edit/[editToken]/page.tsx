@@ -7,6 +7,7 @@ import { DocBody, isHtmlDocument } from "@/components/DocBody";
 import { AskAIModal } from "@/components/AskAIModal";
 import { DownloadMenu } from "@/components/DownloadMenu";
 import { TiptapEditor } from "@/components/TiptapEditor";
+import { CollaboratorsPanel } from "@/components/CollaboratorsPanel";
 import { useAuth } from "@/components/AuthProvider";
 
 type EditDoc = {
@@ -384,6 +385,15 @@ export default function EditPage() {
           </button>
         </div>
       </section>
+
+      {/* Collaborators — owner-only. Email-based invites with optional
+          Resend send. Hidden for unowned docs (claim first) and for
+          non-owners who happen to hold the editToken. */}
+      {doc.ownerId && user && doc.ownerId === user.uid && (
+        <section className="mt-8">
+          <CollaboratorsPanel docId={doc.docId} isOwner />
+        </section>
+      )}
 
       <div className="mt-8 border-t border-gray-100 pt-4">
         <button

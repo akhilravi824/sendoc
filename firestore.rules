@@ -93,5 +93,19 @@ service cloud.firestore {
         && resource.data.uid == request.auth.uid;
       allow write: if false;
     }
+
+    // Collaborators — owner-issued invites tied to an email address.
+    // The invitee can read records that match their auth email so the
+    // dashboard can list "shared with me" pending + accepted invites.
+    // The owner can also read their own records (we serve those via
+    // the API though, with a separate doc-ownership check).
+    // Server-only writes (Admin SDK enforces all the policy).
+    match /collaborators/{id} {
+      allow read: if request.auth != null
+        && (resource.data.email == request.auth.token.email
+            || resource.data.acceptedByUid == request.auth.uid
+            || isPrivileged());
+      allow write: if false;
+    }
   }
 }
