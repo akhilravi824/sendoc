@@ -1,0 +1,51 @@
+# Fly.io config for sendoc-collab.
+#
+# Run once before first deploy:
+#   cd collab/
+#   flyctl auth signup        # if you haven't yet
+#   flyctl launch --no-deploy --copy-config --name sendoc-collab
+#   flyctl secrets set FIREBASE_ADMIN_PROJECT_ID=...
+#   flyctl secrets set FIREBASE_ADMIN_CLIENT_EMAIL=...
+#   flyctl secrets set FIREBASE_ADMIN_PRIVATE_KEY="$(cat path/to/key.txt)"
+#   flyctl secrets set API_KEY_PEPPER=...   # MUST match the Next app's value
+#
+# Then deploy with:
+#   flyctl deploy
+#
+# Update the Next app's NEXT_PUBLIC_COLLAB_URL env var to:
+#   wss://sendoc-collab.fly.dev
+
+app = "sendoc-collab"
+primary_region = "iad"   # change to a region near your users; iad = Ashburn, VA
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "1234"
+
+[http_service]
+  internal_port = 1234
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0   # cold-start tolerable for V1; bump to 1 once we have users
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 200
+    hard_limit = 250
+
+[[services.ports]]
+  port = 80
+  handlers = ["http"]
+  force_https = true
+
+[[services.ports]]
+  port = 443
+  handlers = ["tls", "http"]
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

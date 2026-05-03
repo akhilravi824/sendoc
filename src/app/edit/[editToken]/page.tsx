@@ -6,6 +6,7 @@ import Link from "next/link";
 import { DocBody, isHtmlDocument } from "@/components/DocBody";
 import { AskAIModal } from "@/components/AskAIModal";
 import { DownloadMenu } from "@/components/DownloadMenu";
+import { TiptapEditor } from "@/components/TiptapEditor";
 import { useAuth } from "@/components/AuthProvider";
 
 type EditDoc = {
@@ -35,6 +36,10 @@ export default function EditPage() {
   const [askAIOpen, setAskAIOpen] = useState(false);
   const [claiming, setClaiming] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
+  // Bumped only when AI apply forces a full content replace. Used as the
+  // editor's React `key` so an apply remounts Tiptap with fresh content;
+  // ordinary user typing does NOT bump this and the editor stays alive.
+  const [aiApplyCount, setAiApplyCount] = useState(0);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -105,6 +110,11 @@ export default function EditPage() {
     if (!doc) return;
     setDoc({ ...doc, content: newContent });
     queueSave({ content: newContent });
+    // Force the editor to remount with the new content. Tiptap's
+    // Collaboration extension can't be told to "replace the whole doc"
+    // safely without disrupting the Yjs CRDT state; remount is the
+    // simplest correct option for now.
+    setAiApplyCount((n) => n + 1);
   };
 
   const onCopyEdit = async () => {
@@ -302,11 +312,14 @@ export default function EditPage() {
         }`}
       >
         {(view === "edit" || view === "split") && (
-          <textarea
-            value={doc.content}
-            onChange={(e) => onContentChange(e.target.value)}
-            className="min-h-[60vh] w-full resize-none rounded-lg border border-gray-200 bg-white p-6 font-mono text-sm leading-relaxed text-gray-800 shadow-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
-            placeholder="Start writing in Markdown…"
+          <TiptapEditor
+            key={`editor-${aiApplyCount}`}
+            initialMarkdown={doc.content}
+            onChange={onContentChange}
+            placeholder="Start writing — your changes auto-save"
+            docId={doc.docId}
+            editToken={editToken}
+            userName={user?.displayName ?? user?.email ?? "Anon"}
           />
         )}
         {(view === "preview" || view === "split") && (

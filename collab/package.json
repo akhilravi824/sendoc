@@ -1,0 +1,27 @@
+{
+  "name": "sendoc-collab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Real-time collaboration server for sendoc — Hocuspocus + Yjs over WebSocket. Brokers edits between concurrent users on the same /edit/[editToken] page.",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hocuspocus/server": "^2.15.3",
+    "firebase-admin": "^13.8.0",
+    "yjs": "^13.6.30"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.17",
+    "tsx": "^4.20.0",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
