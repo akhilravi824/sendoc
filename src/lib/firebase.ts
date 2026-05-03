@@ -8,8 +8,13 @@
 // env vars available. If we initialized eagerly, a missing var would
 // throw `auth/invalid-api-key` and crash the build.
 //
-// Proxies defer real init until the first method call (which only
-// happens at runtime in the browser, when env vars are guaranteed).
+// `auth` stays a Proxy because every consumer calls methods on it, and
+// the Proxy's `get` trap returns bound methods correctly. `db`, on the
+// other hand, gets passed AS AN ARGUMENT to free functions like
+// `collection(db, ...)` and `doc(db, ...)`, which do an `instanceof
+// FirebaseFirestore` check internally — and a Proxy with target `{}`
+// fails that check. So `db` is exposed via `getDb()` which returns the
+// real instance (still lazy: nothing runs until first call).
 
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, type Auth } from "firebase/auth";
@@ -49,10 +54,10 @@ export const auth: Auth = makeLazy<Auth>(() => {
   return _auth;
 });
 
-export const db: Firestore = makeLazy<Firestore>(() => {
+export function getDb(): Firestore {
   if (!_db) _db = getFirestore(ensureApp());
   return _db;
-});
+}
 
 export const googleProvider = makeLazy<GoogleAuthProvider>(
   () => new GoogleAuthProvider(),

@@ -17,7 +17,7 @@ import {
   query,
   where,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/components/AuthProvider";
 import { PromptBox } from "@/components/PromptBox";
 import { SignOutButton } from "@/components/SignOutButton";
@@ -75,7 +75,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (!user) return;
     const q = query(
-      collection(db, "docs"),
+      collection(getDb(), "docs"),
       where("ownerId", "==", user.uid),
       orderBy("updatedAt", "desc"),
     );

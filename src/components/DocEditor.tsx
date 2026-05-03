@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { doc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { getDb } from "@/lib/firebase";
 import { useAuth } from "./AuthProvider";
 
 type Doc = {
@@ -40,7 +40,7 @@ export function DocEditor({ docId }: { docId: string }) {
   // Live-subscribe to the doc.
   useEffect(() => {
     if (!user) return;
-    const unsub = onSnapshot(doc(db, "docs", docId), (snap) => {
+    const unsub = onSnapshot(doc(getDb(), "docs", docId), (snap) => {
       if (!snap.exists()) {
         setError("Document not found");
         return;
@@ -107,7 +107,7 @@ export function DocEditor({ docId }: { docId: string }) {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
       try {
-        await updateDoc(doc(db, "docs", docId), {
+        await updateDoc(doc(getDb(), "docs", docId), {
           content: next,
           updatedAt: serverTimestamp(),
         });
@@ -139,7 +139,7 @@ export function DocEditor({ docId }: { docId: string }) {
           onChange={async (e) => {
             const next = e.target.value;
             setDoc({ ...doc_, title: next });
-            await updateDoc(doc(db, "docs", docId), {
+            await updateDoc(doc(getDb(), "docs", docId), {
               title: next,
               updatedAt: serverTimestamp(),
             });

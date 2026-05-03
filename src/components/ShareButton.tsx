@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { doc as docRef, getDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { getDb } from "@/lib/firebase";
 
 export function ShareButton({ docId }: { docId: string }) {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
@@ -12,7 +12,7 @@ export function ShareButton({ docId }: { docId: string }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const snap = await getDoc(docRef(db, "docs", docId));
+      const snap = await getDoc(docRef(getDb(), "docs", docId));
       if (cancelled || !snap.exists()) return;
       const token = snap.data()?.shareLink?.token;
       if (token && typeof window !== "undefined") {
