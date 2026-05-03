@@ -15,7 +15,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { onAuthStateChanged, signInAnonymously, type User } from "firebase/auth";
+import {
+  getRedirectResult,
+  onAuthStateChanged,
+  signInAnonymously,
+  type User,
+} from "firebase/auth";
 import { auth } from "@/lib/firebase";
 
 type Role = "user" | "moderator" | "admin" | "super_admin";
@@ -47,12 +52,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Resolve any pending redirect-based sign-in BEFORE wiring
+    // onAuthStateChanged. signInWithRedirect leaves the result in
+    // session storage; if we don't await getRedirectResult here, the
+    // redirect-back can race with onAuthStateChanged firing for the
+    // pre-existing anonymous user, leaving the UI confused about who
+    // is actually signed in.
+    (async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result?.user) {
+          console.log(
+            "[sendoc/auth] redirect sign-in resolved",
+            result.user.email ?? result.user.uid,
+          );
+        }
+      } catch (e) {
+        console.error("[sendoc/auth] getRedirectResult error:", e);
+      }
+    })();
+
     const unsub = onAuthStateChanged(auth, async (u) => {
+      console.log(
+        "[sendoc/auth] onAuthStateChanged →",
+        u
+          ? `${u.uid} (${u.isAnonymous ? "anon" : u.email ?? "signed-in"})`
+          : "null",
+      );
       if (!u) {
         try {
           await signInAnonymously(auth);
         } catch (e) {
-          console.error("[sendoc] anonymous sign-in failed", e);
+          console.error("[sendoc/auth] anonymous sign-in failed", e);
           setLoading(false);
         }
         return;
