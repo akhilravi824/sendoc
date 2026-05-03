@@ -24,11 +24,9 @@ import {
   getRedirectResult,
   GoogleAuthProvider,
   linkWithCredential,
-  linkWithPopup,
   sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
-  signInWithPopup,
   signInWithRedirect,
   signOut,
 } from "firebase/auth";
@@ -66,17 +64,6 @@ function friendlyError(e: unknown): string {
   }
 }
 
-// Codes that mean "popup didn't work — try the redirect path instead".
-function isPopupBlocked(e: unknown): boolean {
-  const fe = e as FirebaseError;
-  return (
-    fe.code === "auth/popup-blocked" ||
-    fe.code === "auth/popup-closed-by-user" ||
-    fe.code === "auth/cancelled-popup-request" ||
-    fe.code === "auth/operation-not-supported-in-this-environment" ||
-    fe.code === "auth/web-storage-unsupported"
-  );
-}
 
 export default function LoginPage() {
   const { user, isAnonymous, loading } = useAuth();
@@ -138,45 +125,25 @@ export default function LoginPage() {
     setErr(null);
     setInfo(null);
     try {
-      // If we're currently anonymous, try to LINK Google to the anon UID
-      // so the user keeps any docs they've published this session.
+      // Always use redirect, never popup. Popups silently fail on
+      // browsers that block third-party cookies (Safari default,
+      // Chrome incognito, Brave, hardened profiles) — the popup opens,
+      // the user picks their account, the popup closes, and the
+      // credential never propagates to Firebase. signInWithRedirect
+      // routes through the firebaseapp.com domain as a top-level
+      // navigation, which doesn't depend on third-party cookies.
+      // Trade: ~0.5s slower UX (full page bounce) for reliability.
+      // We sign out the anonymous session first because anon-link via
+      // redirect can't recover gracefully from auth/credential-already-
+      // in-use; the claim flow on /edit/[token] handles anon-doc
+      // recovery if the user holds the editToken.
       if (auth.currentUser?.isAnonymous) {
-        try {
-          await linkWithPopup(auth.currentUser, new GoogleAuthProvider());
-          router.replace("/dashboard");
-          return;
-        } catch (e) {
-          const fe = e as FirebaseError;
-          if (fe.code === "auth/credential-already-in-use") {
-            // The Google account is already a separate Firebase user — fall
-            // through to plain sign-in (this session's anon docs orphan).
-            await signOut(auth);
-          } else if (isPopupBlocked(e)) {
-            // Browser blocked the popup. We deliberately do NOT use
-            // linkWithRedirect here because if linking fails (Google is
-            // already a separate user), the redirect-back path can't
-            // recover cleanly — getRedirectResult throws and we have
-            // to start over. signInWithRedirect always succeeds when
-            // the Google account exists, at the cost of orphaning this
-            // session's anon docs (claim flow recovers them).
-            await signOut(auth).catch(() => undefined);
-            await signInWithRedirect(auth, new GoogleAuthProvider());
-            return;
-          } else {
-            throw e;
-          }
-        }
+        await signOut(auth).catch(() => undefined);
       }
-      try {
-        await signInWithPopup(auth, new GoogleAuthProvider());
-        router.replace("/dashboard");
-      } catch (e) {
-        if (isPopupBlocked(e)) {
-          await signInWithRedirect(auth, new GoogleAuthProvider());
-          return;
-        }
-        throw e;
-      }
+      await signInWithRedirect(auth, new GoogleAuthProvider());
+      // signInWithRedirect navigates away — no further code runs in
+      // this tab until the user returns and getRedirectResult fires
+      // in the mount effect above.
     } catch (e) {
       const msg = friendlyError(e);
       if (msg) setErr(msg);
