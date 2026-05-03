@@ -17,13 +17,27 @@ import { useState } from "react";
 import Link from "next/link";
 import {
   linkWithPopup,
+  linkWithRedirect,
   signInWithPopup,
+  signInWithRedirect,
   GoogleAuthProvider,
   signOut,
 } from "firebase/auth";
 import { type FirebaseError } from "firebase/app";
 import { auth } from "@/lib/firebase";
 import { useAuth } from "./AuthProvider";
+
+// Codes that mean "popup didn't work — try redirect instead".
+function isPopupBlocked(e: unknown): boolean {
+  const fe = e as FirebaseError;
+  return (
+    fe.code === "auth/popup-blocked" ||
+    fe.code === "auth/popup-closed-by-user" ||
+    fe.code === "auth/cancelled-popup-request" ||
+    fe.code === "auth/operation-not-supported-in-this-environment" ||
+    fe.code === "auth/web-storage-unsupported"
+  );
+}
 
 export function SaveYourWorkBanner() {
   const { user, isAnonymous } = useAuth();
@@ -36,27 +50,39 @@ export function SaveYourWorkBanner() {
     setBusy(true);
     setErr(null);
     try {
-      await linkWithPopup(user, new GoogleAuthProvider());
-      // Success — same UID, now backed by Google identity. No reload needed;
-      // the AuthProvider's onAuthStateChanged will pick up isAnonymous=false.
+      try {
+        await linkWithPopup(user, new GoogleAuthProvider());
+        // Success — same UID, now backed by Google identity. No reload needed;
+        // the AuthProvider's onAuthStateChanged will pick up isAnonymous=false.
+        return;
+      } catch (e) {
+        const fe = e as FirebaseError;
+        if (fe.code === "auth/credential-already-in-use") {
+          // The Google account is already a Firebase user. Sign out anon,
+          // sign in to the existing Google account. Anon docs from this
+          // session are orphaned (the claim flow on /edit/[token] handles
+          // recovery if the user holds the editToken).
+          await signOut(auth);
+          try {
+            await signInWithPopup(auth, new GoogleAuthProvider());
+          } catch (e2) {
+            if (isPopupBlocked(e2)) {
+              await signInWithRedirect(auth, new GoogleAuthProvider());
+              return;
+            }
+            throw e2;
+          }
+        } else if (isPopupBlocked(e)) {
+          // Browser blocked the popup; redirect-link instead.
+          await linkWithRedirect(user, new GoogleAuthProvider());
+          return;
+        } else {
+          throw e;
+        }
+      }
     } catch (e) {
       const fe = e as FirebaseError;
-      if (fe.code === "auth/credential-already-in-use") {
-        // The Google account is already a Firebase user. Sign out anon, sign
-        // in to the existing Google account. (Anon docs from this session are
-        // orphaned — we'll add a "claim" flow in a later sprint.)
-        try {
-          await signOut(auth);
-          await signInWithPopup(auth, new GoogleAuthProvider());
-        } catch (e2) {
-          const fe2 = e2 as FirebaseError;
-          setErr(fe2.message || "Sign-in failed");
-        }
-      } else if (fe.code === "auth/popup-closed-by-user") {
-        // User just closed the popup — silent no-op.
-      } else {
-        setErr(fe.message || "Couldn't save your work");
-      }
+      setErr(fe.message || "Couldn't save your work");
     } finally {
       setBusy(false);
     }

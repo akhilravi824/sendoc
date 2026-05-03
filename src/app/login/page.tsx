@@ -21,13 +21,16 @@ import { useRouter } from "next/navigation";
 import {
   createUserWithEmailAndPassword,
   EmailAuthProvider,
+  getRedirectResult,
   GoogleAuthProvider,
   linkWithCredential,
   linkWithPopup,
+  linkWithRedirect,
   sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
 } from "firebase/auth";
 import { type FirebaseError } from "firebase/app";
@@ -56,10 +59,24 @@ function friendlyError(e: unknown): string {
     case "auth/operation-not-allowed":
       return "Email/password sign-in isn't enabled yet. Use Google for now.";
     case "auth/popup-closed-by-user":
-      return "";
+    case "auth/cancelled-popup-request":
+    case "auth/popup-blocked":
+      return ""; // handled with redirect fallback
     default:
       return fe.message || "Something went wrong.";
   }
+}
+
+// Codes that mean "popup didn't work — try the redirect path instead".
+function isPopupBlocked(e: unknown): boolean {
+  const fe = e as FirebaseError;
+  return (
+    fe.code === "auth/popup-blocked" ||
+    fe.code === "auth/popup-closed-by-user" ||
+    fe.code === "auth/cancelled-popup-request" ||
+    fe.code === "auth/operation-not-supported-in-this-environment" ||
+    fe.code === "auth/web-storage-unsupported"
+  );
 }
 
 export default function LoginPage() {
@@ -78,6 +95,27 @@ export default function LoginPage() {
     }
   }, [loading, user, isAnonymous, router]);
 
+  // Handle the return half of the redirect-based sign-in path. When a
+  // user signs in via signInWithRedirect / linkWithRedirect, the page
+  // navigates to Google and back — getRedirectResult resolves on first
+  // load with the resulting credential (or null if there's nothing to
+  // process). Errors here are surfaced inline.
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result?.user) {
+          router.replace("/dashboard");
+        }
+      } catch (e) {
+        const msg = friendlyError(e);
+        if (msg) setErr(msg);
+      }
+    })();
+    // run once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleGoogle = async () => {
     setBusy("google");
     setErr(null);
@@ -92,14 +130,34 @@ export default function LoginPage() {
           return;
         } catch (e) {
           const fe = e as FirebaseError;
-          if (fe.code !== "auth/credential-already-in-use") throw e;
-          // The Google account is already a separate Firebase user — fall
-          // through to plain sign-in (this session's anon docs orphan).
-          await signOut(auth);
+          if (fe.code === "auth/credential-already-in-use") {
+            // The Google account is already a separate Firebase user — fall
+            // through to plain sign-in (this session's anon docs orphan).
+            await signOut(auth);
+          } else if (isPopupBlocked(e)) {
+            // Browser blocked the popup; redirect-link instead. The
+            // redirect leaves this page; getRedirectResult on the way
+            // back finishes the sign-in.
+            await linkWithRedirect(
+              auth.currentUser!,
+              new GoogleAuthProvider(),
+            );
+            return;
+          } else {
+            throw e;
+          }
         }
       }
-      await signInWithPopup(auth, new GoogleAuthProvider());
-      router.replace("/dashboard");
+      try {
+        await signInWithPopup(auth, new GoogleAuthProvider());
+        router.replace("/dashboard");
+      } catch (e) {
+        if (isPopupBlocked(e)) {
+          await signInWithRedirect(auth, new GoogleAuthProvider());
+          return;
+        }
+        throw e;
+      }
     } catch (e) {
       const msg = friendlyError(e);
       if (msg) setErr(msg);
