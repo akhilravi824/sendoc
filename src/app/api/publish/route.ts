@@ -66,7 +66,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let body: { title?: string; content?: string; source?: string };
+  let body: {
+    title?: string;
+    content?: string;
+    source?: string;
+    visibility?: "public" | "private";
+  };
   try {
     body = await req.json();
   } catch {
@@ -123,6 +128,8 @@ export async function POST(req: NextRequest) {
     "Untitled";
   const source =
     typeof body.source === "string" ? body.source.slice(0, 40) : null;
+  const visibility: "public" | "private" =
+    body.visibility === "private" ? "private" : "public";
 
   await adminDb()
     .collection("docs")
@@ -143,6 +150,7 @@ export async function POST(req: NextRequest) {
         ttl: null,
         createdAt: now,
         active: true,
+        visibility,
       },
       meta: {
         aiModel: null,
@@ -175,6 +183,7 @@ export async function POST(req: NextRequest) {
       docId,
       title,
       source,
+      visibility,
       shareUrl: `${appUrl}/d/${linkToken}`,
       editUrl: `${appUrl}/edit/${editTok.plaintext}`,
       editToken: editTok.plaintext,

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { adminDb, verifyIdToken } from "@/lib/firebase-admin";
 import { expiryFor, isExpired } from "@/lib/link-ttl";
 
 export const runtime = "nodejs";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { token: string } },
 ) {
   const { token } = params;
@@ -39,10 +39,42 @@ export async function GET(
     );
   }
 
+  // Private links require a signed-in (non-anonymous) Firebase user.
+  // The publisher chose "private" at publish time — we don't enforce
+  // that the viewer is a *specific* person, just that they have a
+  // sendoc account. Pairs with an honor-system notice on the page.
+  const visibility: "public" | "private" =
+    data.shareLink?.visibility === "private" ? "private" : "public";
+  if (visibility === "private") {
+    try {
+      const decoded = await verifyIdToken(req.headers.get("authorization"));
+      if (decoded.firebase?.sign_in_provider === "anonymous") {
+        return NextResponse.json(
+          {
+            error: "AUTH_REQUIRED",
+            message: "Sign in to view this private document.",
+            visibility: "private",
+          },
+          { status: 401 },
+        );
+      }
+    } catch {
+      return NextResponse.json(
+        {
+          error: "AUTH_REQUIRED",
+          message: "Sign in to view this private document.",
+          visibility: "private",
+        },
+        { status: 401 },
+      );
+    }
+  }
+
   return NextResponse.json({
     title: data.title ?? "Untitled",
     content: data.content ?? "",
     updatedAt: data.updatedAt?.toMillis?.() ?? null,
     expiresAt: expiryFor(data),
+    visibility,
   });
 }
