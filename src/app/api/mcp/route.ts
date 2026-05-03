@@ -26,7 +26,7 @@ export const runtime = "nodejs";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "sendoc";
-const SERVER_VERSION = "1.1.0";
+const SERVER_VERSION = "1.2.0";
 
 type JsonRpcRequest = {
   jsonrpc: "2.0";
@@ -46,11 +46,13 @@ const TOOLS = [
   {
     name: "publish_to_sendoc",
     description:
-      "Publish a document to sendoc and get back a public share URL. " +
+      "Publish a document to sendoc and get back a share URL. " +
       "Use this whenever the user asks to publish, share, or save content " +
-      "as a public link. Returns a shareUrl that anyone can open in a browser " +
-      "(no sendoc account required to view) plus an editToken the user should " +
-      "save if they want to edit the document later.",
+      "as a link. Returns a shareUrl plus an editToken the user should save " +
+      "if they want to edit the document later. Pass visibility='private' " +
+      "(or detect intent from phrases like 'private', 'just for me', 'don't " +
+      "make it public') to require viewers to sign in to a sendoc account " +
+      "before reading; default 'public' lets anyone with the URL open it.",
     inputSchema: {
       type: "object",
       required: ["content"],
@@ -64,6 +66,14 @@ const TOOLS = [
           type: "string",
           description:
             "Document body. Use clean Markdown — # for title, ## for sections, lists where they help.",
+        },
+        visibility: {
+          type: "string",
+          enum: ["public", "private"],
+          description:
+            "'public' (default): anyone with the URL can read, no account needed. " +
+            "'private': viewers must sign in to a sendoc account first; the " +
+            "viewer page shows a 'don't forward this link' notice.",
         },
       },
     },
@@ -134,9 +144,10 @@ function normalizeEditToken(input: string): string {
 }
 
 async function callPublish(
-  args: { title?: string; content: string },
+  args: { title?: string; content: string; visibility?: "public" | "private" },
   origin: string,
 ): Promise<McpResult> {
+  const visibility = args.visibility === "private" ? "private" : "public";
   const res = await fetch(`${origin}/api/publish`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -144,6 +155,7 @@ async function callPublish(
       title: args.title,
       content: args.content,
       source: "claude-mcp",
+      visibility,
     }),
   });
   const json = await res.json();
@@ -152,9 +164,13 @@ async function callPublish(
       `Publish failed: ${json.message ?? json.error ?? "unknown error"}`,
     );
   }
+  const accessNote =
+    visibility === "private"
+      ? `🔒 Private — viewers must sign in to a sendoc account to read.\n`
+      : `🌐 Public — anyone with the URL can read, no account needed.\n`;
   return textResult(
-    `✓ Published to sendoc.\n\n` +
-      `📖 Public read URL (share this with viewers):\n${json.shareUrl}\n\n` +
+    `✓ Published to sendoc.\n${accessNote}\n` +
+      `📖 Read URL (share this with viewers):\n${json.shareUrl}\n\n` +
       `✏️ Edit URL (share only with collaborators you trust — anyone with this URL can edit):\n${json.editUrl}\n\n` +
       `editToken: ${json.editToken}`,
   );
@@ -249,6 +265,7 @@ async function handleRpc(
           title?: string;
           content?: string;
           editToken?: string;
+          visibility?: "public" | "private";
         };
       };
       const args = params.arguments ?? {};
@@ -262,7 +279,11 @@ async function handleRpc(
           };
         }
         const result = await callPublish(
-          { title: args.title, content: args.content },
+          {
+            title: args.title,
+            content: args.content,
+            visibility: args.visibility,
+          },
           origin,
         );
         return { jsonrpc: "2.0", id, result };

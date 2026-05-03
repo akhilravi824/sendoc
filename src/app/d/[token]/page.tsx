@@ -14,6 +14,7 @@ type SharedDoc = {
   content: string;
   updatedAt: number | null;
   expiresAt: number | null;
+  visibility?: "public" | "private";
 };
 
 type SaveStatus = {
@@ -123,16 +124,32 @@ function ReportButton({ token }: { token: string }) {
 
 export default function SharedDocPage() {
   const { token } = useParams<{ token: string }>();
+  const { idToken, isAnonymous, loading: authLoading } = useAuth();
   const [doc, setDoc] = useState<SharedDoc | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
 
   useEffect(() => {
+    // Wait for auth to settle so we can attach a real ID token to the
+    // request. Without it, private docs would always 401 on first paint
+    // even for users who *are* signed in.
+    if (authLoading) return;
     let cancelled = false;
+    setError(null);
+    setAuthRequired(false);
     (async () => {
       try {
-        const res = await fetch(`/api/share/${token}`);
+        const headers: Record<string, string> = {};
+        if (idToken && !isAnonymous) {
+          headers.Authorization = `Bearer ${idToken}`;
+        }
+        const res = await fetch(`/api/share/${token}`, { headers });
         const json = await res.json();
         if (cancelled) return;
+        if (res.status === 401 && json.error === "AUTH_REQUIRED") {
+          setAuthRequired(true);
+          return;
+        }
         if (!res.ok) {
           setError(json.error || "Failed to load");
           return;
@@ -147,7 +164,35 @@ export default function SharedDocPage() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, idToken, isAnonymous, authLoading]);
+
+  if (authRequired) {
+    const next = `/d/${token}`;
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center">
+        <div className="max-w-md space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-wider text-brand">
+            Private document
+          </p>
+          <h1 className="text-xl font-semibold text-gray-900">
+            Sign in to view this document
+          </h1>
+          <p className="text-sm text-gray-500">
+            This link is for you — please don&rsquo;t share it with anyone else.
+          </p>
+        </div>
+        <Link
+          href={`/login?next=${encodeURIComponent(next)}`}
+          className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+        >
+          Continue to sign in
+        </Link>
+        <Link href="/" className="text-xs text-gray-400 hover:underline">
+          What is sendoc?
+        </Link>
+      </main>
+    );
+  }
 
   if (error) {
     const message =
@@ -203,6 +248,13 @@ export default function SharedDocPage() {
           <SignInOrAccountChip token={token} />
         </div>
       </header>
+
+      {doc.visibility === "private" && (
+        <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          This is a private document — please don&rsquo;t forward this link.
+          Anyone you share it with will need to sign in to view.
+        </p>
+      )}
 
       {isHtml && (
         <h1 className="mb-4 text-2xl font-semibold text-gray-900">{doc.title}</h1>
