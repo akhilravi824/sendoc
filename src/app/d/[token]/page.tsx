@@ -6,6 +6,7 @@ import Link from "next/link";
 import { DocBody, isHtmlDocument } from "@/components/DocBody";
 import { SharePopover } from "@/components/SharePopover";
 import { DownloadMenu } from "@/components/DownloadMenu";
+import { useAuth } from "@/components/AuthProvider";
 
 type SharedDoc = {
   title: string;
@@ -13,6 +14,79 @@ type SharedDoc = {
   updatedAt: number | null;
   expiresAt: number | null;
 };
+
+type SaveStatus = {
+  saved: boolean;
+  signedIn: boolean;
+  ownedBySelf?: boolean;
+};
+
+function SaveToDashboardButton({ token }: { token: string }) {
+  const { idToken, isAnonymous, loading } = useAuth();
+  const [status, setStatus] = useState<SaveStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Fetch initial state — only meaningful when signed in.
+  useEffect(() => {
+    if (loading) return;
+    let cancelled = false;
+    (async () => {
+      const headers: Record<string, string> = {};
+      if (idToken && !isAnonymous) headers.Authorization = `Bearer ${idToken}`;
+      const res = await fetch(`/api/share/${token}/save/status`, { headers });
+      if (cancelled) return;
+      if (res.ok) {
+        const json = (await res.json()) as SaveStatus;
+        setStatus(json);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, idToken, isAnonymous, loading]);
+
+  if (loading || !status) return null;
+
+  // Anonymous + signed-out users see a "Sign in to save" CTA via the
+  // existing Sign in button in the header. Don't double up here.
+  if (!status.signedIn) return null;
+
+  // Owner sees nothing — they already manage this doc from their
+  // dashboard's "Mine" tab.
+  if (status.ownedBySelf) return null;
+
+  const onClick = async () => {
+    if (!idToken || busy) return;
+    setBusy(true);
+    try {
+      const method = status.saved ? "DELETE" : "POST";
+      const res = await fetch(`/api/share/${token}/save`, {
+        method,
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      if (res.ok) {
+        setStatus({ ...status, saved: !status.saved });
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={busy}
+      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition disabled:opacity-60 ${
+        status.saved
+          ? "border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+          : "border border-gray-200 bg-white text-gray-800 hover:bg-gray-50"
+      }`}
+      title={status.saved ? "Remove from dashboard" : "Save to my dashboard"}
+    >
+      {busy ? "…" : status.saved ? "✓ Saved" : "+ Save"}
+    </button>
+  );
+}
 
 function ReportButton({ token }: { token: string }) {
   const [state, setState] = useState<"idle" | "sending" | "sent">("idle");
@@ -123,12 +197,8 @@ export default function SharedDocPage() {
           </span>
           <DownloadMenu title={doc.title} content={doc.content} />
           <SharePopover title={doc.title} shareToken={token} />
-          <Link
-            href="/login"
-            className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700"
-          >
-            Sign in
-          </Link>
+          <SaveToDashboardButton token={token} />
+          <SignInOrAccountChip />
         </div>
       </header>
 
@@ -148,5 +218,32 @@ export default function SharedDocPage() {
         <ReportButton token={token} />
       </footer>
     </main>
+  );
+}
+
+/**
+ * Auth chip for the share page header. Shows "Sign in" when anonymous,
+ * a small dashboard link when signed in.
+ */
+function SignInOrAccountChip() {
+  const { isAnonymous, loading } = useAuth();
+  if (loading) return null;
+  if (isAnonymous) {
+    return (
+      <Link
+        href="/login"
+        className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700"
+      >
+        Sign in
+      </Link>
+    );
+  }
+  return (
+    <Link
+      href="/dashboard"
+      className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50"
+    >
+      Dashboard
+    </Link>
   );
 }

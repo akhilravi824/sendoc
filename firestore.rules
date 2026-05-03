@@ -83,5 +83,15 @@ service cloud.firestore {
       allow read: if isPrivileged();
       allow write: if false;
     }
+
+    // Saved docs — when a signed-in user clicks "Save to my dashboard"
+    // on someone else's share URL, we record an entry here so the doc
+    // shows up in their "Shared with me" filter. Doc ID is uid_docId
+    // for natural deduplication. Self-read; server-only writes.
+    match /savedDocs/{id} {
+      allow read: if request.auth != null
+        && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
   }
 }

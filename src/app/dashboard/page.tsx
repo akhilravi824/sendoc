@@ -34,7 +34,18 @@ type DocSummary = {
   purgeAt?: { toDate: () => Date };
 };
 
-type Filter = "all" | "live" | "removed";
+type SavedDoc = {
+  /** Firestore doc id, e.g. uid_docId */
+  id: string;
+  docId: string;
+  title: string;
+  shareToken: string;
+  ownerEmail: string | null;
+  sourceMode: string | null;
+  savedAt?: { toDate: () => Date };
+};
+
+type Filter = "all" | "live" | "removed" | "shared";
 
 function formatRelative(date: Date): string {
   const ms = Date.now() - date.getTime();
@@ -68,10 +79,12 @@ function statusBadge(d: DocSummary) {
 export default function Dashboard() {
   const { user, idToken, isAnonymous, loading } = useAuth();
   const [docs, setDocs] = useState<DocSummary[]>([]);
+  const [savedDocs, setSavedDocs] = useState<SavedDoc[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
   const [busyDocId, setBusyDocId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Owned docs — anything where ownerId === current uid
   useEffect(() => {
     if (!user) return;
     const q = query(
@@ -87,17 +100,45 @@ export default function Dashboard() {
     return () => unsub();
   }, [user]);
 
+  // Saved docs — share URLs the user has explicitly added to their
+  // dashboard via the "Save" button on /d/<token>. Distinct from owned
+  // docs; surfaced under the "Shared" filter pill.
+  useEffect(() => {
+    if (!user || isAnonymous) return;
+    const q = query(
+      collection(getDb(), "savedDocs"),
+      where("uid", "==", user.uid),
+      orderBy("savedAt", "desc"),
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setSavedDocs(
+        snap.docs.map(
+          (d) =>
+            ({ ...(d.data() as Omit<SavedDoc, "id">), id: d.id }) as SavedDoc,
+        ),
+      );
+    });
+    return () => unsub();
+  }, [user, isAnonymous]);
+
   const counts = useMemo(() => {
     const live = docs.filter((d) => !d.status || d.status === "active").length;
     const removed = docs.filter((d) => d.status && d.status !== "active").length;
-    return { all: docs.length, live, removed };
-  }, [docs]);
+    return {
+      all: docs.length,
+      live,
+      removed,
+      shared: savedDocs.length,
+    };
+  }, [docs, savedDocs]);
 
   const filtered = useMemo(() => {
     if (filter === "all") return docs;
     if (filter === "live")
       return docs.filter((d) => !d.status || d.status === "active");
-    return docs.filter((d) => d.status && d.status !== "active");
+    if (filter === "removed")
+      return docs.filter((d) => d.status && d.status !== "active");
+    return docs; // shared filter renders savedDocs separately below
   }, [docs, filter]);
 
   const onDelete = async (doc: DocSummary) => {
@@ -148,6 +189,28 @@ export default function Dashboard() {
     const token = doc.shareLink?.token;
     if (!token) return;
     const url = `${window.location.origin}/d/${token}`;
+    await navigator.clipboard.writeText(url);
+  };
+
+  const onUnsave = async (saved: SavedDoc) => {
+    if (!idToken) return;
+    setBusyDocId(saved.id);
+    try {
+      await fetch(`/api/share/${saved.shareToken}/save`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      // Snapshot listener picks up the removal automatically.
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't remove");
+    } finally {
+      setBusyDocId(null);
+    }
+  };
+
+  const onCopySavedUrl = async (saved: SavedDoc) => {
+    if (typeof window === "undefined") return;
+    const url = `${window.location.origin}/d/${saved.shareToken}`;
     await navigator.clipboard.writeText(url);
   };
 
@@ -222,6 +285,7 @@ export default function Dashboard() {
               [
                 { id: "all", label: `All (${counts.all})` },
                 { id: "live", label: `Live (${counts.live})` },
+                { id: "shared", label: `Shared with me (${counts.shared})` },
                 { id: "removed", label: `Deleted (${counts.removed})` },
               ] as const
             ).map((f) => (
@@ -246,7 +310,15 @@ export default function Dashboard() {
           </div>
         )}
 
-        {filtered.length === 0 ? (
+        {filter === "shared" ? (
+          <SharedWithMeList
+            saved={savedDocs}
+            busyDocId={busyDocId}
+            onUnsave={onUnsave}
+            onCopy={onCopySavedUrl}
+            isAnonymous={isAnonymous}
+          />
+        ) : filtered.length === 0 ? (
           <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-sm">
             <p className="font-medium text-gray-700">
               {filter === "all"
@@ -352,5 +424,106 @@ export default function Dashboard() {
         )}
       </section>
     </main>
+  );
+}
+
+/**
+ * Renders docs the user has saved into their dashboard via the
+ * "Save to my dashboard" button on someone else's share URL.
+ *
+ * Note: anonymous users never have saved docs (the save endpoint
+ * rejects anonymous auth), so this list is always empty for them.
+ */
+function SharedWithMeList({
+  saved,
+  busyDocId,
+  onUnsave,
+  onCopy,
+  isAnonymous,
+}: {
+  saved: SavedDoc[];
+  busyDocId: string | null;
+  onUnsave: (s: SavedDoc) => void;
+  onCopy: (s: SavedDoc) => void;
+  isAnonymous: boolean;
+}) {
+  if (isAnonymous) {
+    return (
+      <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-sm">
+        <p className="font-medium text-gray-700">Sign in to use Shared with me</p>
+        <p className="mt-1 text-gray-500">
+          Saved share links are tied to a permanent account.{" "}
+          <Link href="/login" className="text-brand hover:underline">
+            Sign in
+          </Link>
+          {" "}to unlock this filter.
+        </p>
+      </div>
+    );
+  }
+
+  if (saved.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-sm">
+        <p className="font-medium text-gray-700">Nothing here yet</p>
+        <p className="mt-1 text-gray-500">
+          When someone shares a sendoc URL with you, open it and click{" "}
+          <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium">
+            + Save
+          </span>{" "}
+          in the header. It&apos;ll appear here.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
+      {saved.map((s) => {
+        const savedAt = s.savedAt?.toDate?.();
+        return (
+          <li
+            key={s.id}
+            className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  href={`/d/${s.shareToken}`}
+                  className="truncate font-medium hover:underline"
+                >
+                  {s.title || "Untitled"}
+                </Link>
+                <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-blue-800">
+                  Shared
+                </span>
+              </div>
+              <div className="mt-0.5 text-xs text-gray-400">
+                {s.ownerEmail ? `From ${s.ownerEmail} · ` : ""}
+                {savedAt ? `saved ${formatRelative(savedAt)}` : ""}
+              </div>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                onClick={() => onCopy(s)}
+                className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+                title="Copy share URL"
+              >
+                Copy URL
+              </button>
+              <button
+                onClick={() => onUnsave(s)}
+                disabled={busyDocId === s.id}
+                className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+                title="Remove from my dashboard"
+              >
+                {busyDocId === s.id ? "…" : "Remove"}
+              </button>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
